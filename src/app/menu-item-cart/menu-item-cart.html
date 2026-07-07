@@ -1,0 +1,13 @@
+<div class="item-card">
+    <div class="item-image-wrapper">
+      <img [src]="item.image" [alt]="item.name" class="item-image" />
+    </div>
+    <div class="item-info">
+      <h3 class="item-name">{{ item.name }}</h3>
+      <p class="item-desc">{{ item.description }}</p>
+      <div class="item-footer">
+        <span class="item-price">₱{{ item.price }}</span>
+        <button class="add-btn" (click)="onAdd()">+ Add</button>
+      </div>
+    </div>
+  </div>

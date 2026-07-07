@@ -1,0 +1,30 @@
+<div class="landing-container">
+    <div class="landing-card">
+      <img src="chutchut.jpg" alt="Chut Chut" class="landing-logo" />
+      <h1 class="landing-title">CHUT CHUT</h1>
+      <p class="landing-sub">Wings • Corndog • Bilo-Bilo</p>
+  
+      <div class="login-section">
+        <input
+          type="text"
+          class="login-input"
+          placeholder="e.g. EMP001"
+          [value]="staffCode()"
+          (input)="staffCode.set($any($event.target).value)"
+          (keydown.enter)="login()"
+        />
+        <input
+          type="password"
+          class="login-input"
+          placeholder="Enter password"
+          [value]="password()"
+          (input)="password.set($any($event.target).value)"
+          (keydown.enter)="login()"
+        />
+        @if (error()) {
+          <p class="login-error">❌ {{ error() }}</p>
+        }
+        <button class="login-btn" (click)="login()">Login</button>
+      </div>
+    </div>
+  </div>

@@ -1,0 +1,379 @@
+<div class="dashboard-container">
+
+    <div class="dashboard-header">
+      <div class="dashboard-brand">
+        <img src="chutchut.jpg" alt="Chut Chut" class="dashboard-logo" />
+        <div>
+          <h1>Employee Dashboard</h1>
+          <p>Chut Chut Wings — Staff Panel</p>
+        </div>
+      </div>
+  
+      <div class="on-duty-badge">
+        <div class="on-duty-dot-wrap">
+          <div class="on-duty-ring"></div>  
+          <div class="on-duty-dot"></div>
+        </div>
+        <div class="on-duty-info">
+          <p class="on-duty-label">On Duty</p>
+          <p class="on-duty-name">{{ currentStaff()?.name ?? 'Unknown' }}</p>
+          <p class="on-duty-role">{{ currentStaff()?.staffCode ?? '' }}</p>
+        </div>
+      </div>
+  
+      <button class="logout-btn" (click)="logout()">Logout</button>
+    </div>
+  
+    <!-- TABS -->
+    <div class="dashboard-tabs">
+      <button class="tab-btn" [class.active]="activeTab() === 'sales'" (click)="activeTab.set('sales')">
+        Sales
+      </button>
+      <button class="tab-btn" [class.active]="activeTab() === 'new-order'" (click)="activeTab.set('new-order')">
+        New Order
+      </button>
+      <button class="tab-btn" [class.active]="activeTab() === 'menu'" (click)="activeTab.set('menu')">
+        Menu
+      </button>
+      <button class="tab-btn" [class.active]="activeTab() === 'orders'" (click)="activeTab.set('orders')">
+        OrdersList
+      </button>
+    </div>
+  
+    <!-- SALES TAB -->
+    @if (activeTab() === 'sales') {
+      <div class="tab-content">
+        <div class="summary-cards">
+          <div class="summary-card yellow">
+            <p class="summary-label">Total Sales Today</p>
+            <p class="summary-value">&#8369;{{ cartService.todaySales() }}</p>
+          </div>
+          <div class="summary-card red">
+            <p class="summary-label">Total Orders Today</p>
+            <p class="summary-value">{{ cartService.todayOrderCount() }}</p>
+          </div>
+          <div class="summary-card cream">
+            <p class="summary-label">Items Sold</p>
+            <p class="summary-value">{{ itemSales().length }}</p>
+          </div>
+        </div>
+        <div class="dashboard-section">
+          <h2>📦 Quantity Sold</h2>
+          @if (itemSales().length === 0) {
+            <p class="empty-msg">No items sold yet.</p>
+          } @else {
+            @for (item of itemSales(); track item.name) {
+              <div class="inventory-item">
+                <img [src]="item.image" [alt]="item.name" class="inventory-img" />
+                <div class="inventory-info">
+                  <p class="inventory-name">{{ item.name }}</p>
+                  <p class="inventory-qty">{{ item.qty }} sold</p>
+                </div>
+                <span class="inventory-total">&#8369;{{ item.total }}</span>
+              </div>
+            }
+          }
+        </div>
+        <div class="breakdown-grid">
+          <div class="breakdown-card">
+            <h2><img src="transaction.png" alt="Transaction" class="icon-h2"> Transaction Breakdown</h2>
+            <div class="breakdown-items">
+              <div class="breakdown-item">
+                <span><img src="dine-in.png" alt="Dine In" class="icon-sm"> Dine In</span>
+                <span class="breakdown-count">{{ transactionBreakdown().dineIn }} orders</span>
+              </div>
+              <div class="breakdown-item">
+                <span><img src="takeout.png" alt="Take Out" class="icon-sm"> Take Out</span>
+                <span class="breakdown-count">{{ transactionBreakdown().takeOut }} orders</span>
+              </div>
+              <div class="breakdown-item">
+                <span><img src="grab.png" alt="Grab" class="icon-sm"> Grab</span>
+                <span class="breakdown-count">{{ transactionBreakdown().grab }} orders</span>
+              </div>
+            </div>
+          </div>
+  
+          <div class="breakdown-card">
+            <h2><img src="transaction.png" alt="Payment" class="icon-h2"> Payment Breakdown</h2>
+            <div class="breakdown-items">
+              <div class="breakdown-item">
+                <span><img src="cash.png" alt="Cash" class="icon-sm"> Cash</span>
+                <span class="breakdown-count">{{ paymentBreakdown().cash }} orders</span>
+              </div>
+              <div class="breakdown-item">
+                <span><img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm"> Gcash/Maya</span>
+                <span class="breakdown-count">{{ paymentBreakdown().online }} orders</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="reset-section">
+          <button class="reset-btn" (click)="cartService.resetDailySales()">
+            Reset Daily Sales
+          </button>
+        </div>
+      </div>
+    }
+  
+    <!-- NEW ORDER TAB -->
+    @if (activeTab() === 'new-order') {
+      <div class="tab-content">
+  
+        @if (orderStep() === 1) {
+          <div class="order-step-card">
+            <h2 class="step-title">Step 1 — Select Transaction Mode</h2>
+            <div class="step-options">
+              <button class="step-btn" (click)="selectTransaction('Dine In')">
+                <span><img src="dine-in.png" alt="Dine In" class="icon-sm"></span>
+                <span class="step-label">Dine In</span>
+                <span class="step-desc">Eat here at the store</span>
+              </button>
+              <button class="step-btn" (click)="selectTransaction('Take Out')">
+                <span><img src="takeout.png" alt="Take Out" class="icon-sm"></span>
+                <span class="step-label">Take Out</span>
+                <span class="step-desc">Bring your order home</span>
+              </button>
+              <button class="step-btn" (click)="selectTransaction('Grab')">
+                <span><img src="grab.png" alt="Grab" class="icon-sm"></span>
+                <span class="step-label">Grab</span>
+                <span class="step-desc">Order via delivery</span>
+              </button>
+            </div>
+          </div>
+        }
+  
+        @if (orderStep() === 2) {
+          <div class="order-layout">
+            <div class="order-menu">
+              <div class="order-menu-header">
+                <h2>Step 2 — Select Items</h2>
+                <span class="order-mode-badge">{{ selectedTransaction() }}</span>
+              </div>
+  
+              <div class="category-filters">
+                @for (cat of categories; track cat) {
+                  <button
+                    class="filter-btn"
+                    [class.active]="selectedCategory() === cat"
+                    (click)="selectedCategory.set(cat)">
+                    {{ cat }}
+                  </button>
+                }
+              </div>
+  
+              <div class="order-grid">
+                @for (item of filteredItems(); track item._id) {
+                  <div class="order-item-card" (click)="cartService.addToCart(item)">
+                    <img [src]="item.image" [alt]="item.name" class="order-item-img" />
+                    <div class="order-item-info">
+                      <p class="order-item-name">{{ item.name }}</p>
+                      <p class="order-item-price">&#8369;{{ item.price }}</p>
+                    </div>
+                    <button class="order-add-btn">+ Add</button>
+                  </div>
+                }
+              </div>
+            </div>
+  
+            <div class="order-cart">
+              <h2 class="order-cart-title">🛒 Current Order</h2>
+  
+              @if (cartService.cartItems().length === 0) {
+                <div class="order-cart-empty">
+                  <p>No items yet.</p>
+                  <p>Tap an item to add!</p>
+                </div>
+              } @else {
+                <div class="order-cart-items">
+                  @for (entry of cartService.cartItems(); track entry.item._id) {
+                    <div class="order-cart-item">
+                      <div class="order-cart-info">
+                        <p class="order-cart-name">{{ entry.item.name }}</p>
+                        <p class="order-cart-qty">x{{ entry.quantity }}</p>
+                      </div>
+                      <span class="order-cart-price">₱{{ entry.item.price * entry.quantity }}</span>
+                      <button class="order-remove-btn" (click)="cartService.removeFromCart(entry.item._id)">✕</button>
+                    </div>
+                  }
+                </div>
+  
+                <div class="order-cart-footer">
+                  <div class="order-total-row">
+                    <span>Total</span>
+                    <span class="order-total-amt">₱{{ cartService.cartTotal() }}</span>
+                  </div>
+                  <p class="payment-label">Select Payment:</p>
+                  <div class="payment-options">
+                    <button class="payment-opt-btn" (click)="selectPayment('Cash')"><img src="cash.png" alt="Cash" class="icon-sm"></button>
+                    <button class="payment-opt-btn" (click)="selectPayment('Online Payment')"><img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm"></button>
+                  </div>
+                  <button class="clear-order-btn" (click)="cartService.clearCart()">🗑️ Clear</button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+  
+        @if (orderStep() === 3) {
+          <div class="order-success-card">
+            <div class="success-icon">✅</div>
+            <h2>Order Placed!</h2>
+            <p>Transaction: <strong>{{ selectedTransaction() }}</strong></p>
+            <p>Payment: <strong>{{ selectedPayment() }}</strong></p>
+            <button class="new-order-btn" (click)="newOrder()">+ New Order</button>
+            <button class="see-order-btn" (click)="seeOrder()">+ See Order</button>
+          </div>
+        }
+  
+      </div>
+    }
+  
+    <!-- MENU TAB -->
+    @if (activeTab() === 'menu') {
+      <div class="tab-content">
+        <div class="section-header">
+          <h2>Menu Management</h2>
+          <button class="add-btn-primary" (click)="startAddItem()">+ Add Item</button>
+        </div>
+  
+        @if (showMenuForm()) {
+          <div class="form-card">
+            <h3>{{ editingItem() ? 'Edit Item' : 'Add New Item' }}</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" class="form-input"
+                  [value]="newItem().name"
+                  (input)="updateNewItem('name', $any($event.target).value)"
+                  placeholder="Item name" />
+              </div>
+              <div class="form-group">
+                <label>Price (₱)</label>
+                <input type="number" class="form-input"
+                  [value]="newItem().price"
+                  (input)="updateNewItem('price', +$any($event.target).value)"
+                  placeholder="0" />
+              </div>
+              <div class="form-group">
+                <label>Category</label>
+                <select class="form-input"
+                  [value]="newItem().category"
+                  (change)="updateNewItem('category', $any($event.target).value)">
+                  <option value="">Select category</option>
+                  <option value="Wings & Rice">Wings & Rice</option>
+                  <option value="Wings & Fries">Wings & Fries</option>
+                  <option value="Wings & Gravy">Wings & Gravy</option>
+                  <option value="Wings & Drinks">Wings & Drinks</option>
+                  <option value="Combos">Combos</option>
+                  <option value="Fries">Fries</option>
+                  <option value="Corndog">Corndog</option>
+                  <option value="Chillers">Chillers</option>
+                </select>
+              </div>
+              <div class="form-group full-width">
+                <label>Description</label>
+                <input type="text" class="form-input"
+                  [value]="newItem().description"
+                  (input)="updateNewItem('description', $any($event.target).value)"
+                  placeholder="Short description" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="cancel-btn" (click)="cancelMenuForm()">Cancel</button>
+              <button class="save-btn" (click)="saveItem()">
+                {{ editingItem() ? 'Save Changes' : 'Add Item' }}
+              </button>
+            </div>
+          </div>
+        }
+  
+        <div class="menu-grid">
+          @for (item of cartService.menuItems(); track item._id) {
+            <div class="menu-card">
+              <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
+              <div class="menu-card-info">
+                <p class="menu-card-name">{{ item.name }}</p>
+                <p class="menu-card-cat">{{ item.category }}</p>
+                <p class="menu-card-price">₱{{ item.price }}</p>
+              </div>
+              <div class="menu-card-actions">
+                <button class="edit-btn" (click)="startEditItem(item)">✏️ Edit</button>
+                <button class="delete-btn" (click)="deleteItem(item._id)">🗑️ Delete</button>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  
+    <!-- ORDERS TAB -->
+    @if (activeTab() === 'orders') {
+      <div class="tab-content">
+        <div class="section-header">
+          <h2>Orders List</h2>
+        </div>
+  
+        <div class="dashboard-grid">
+  
+          <!-- PENDING ORDERS -->
+          <div class="dashboard-section">
+            <h2>📋 Orders Breakdown <span class="count-pill red">{{ pendingOrders().length }} pending</span></h2>
+            @if (pendingOrders().length === 0) {
+              <p class="empty-msg">No pending orders.</p>
+            } @else {
+              @for (entry of pendingOrders(); track entry.order._id) {
+                <div class="order-card">
+                  <div class="order-header">
+                    <span class="order-id">Order #{{ entry.index }}</span>
+                    <span class="badge yellow">{{ entry.order.transactionMode }}</span>
+                    <span class="badge red">{{ entry.order.paymentMode }}</span>
+                    <span class="order-total">₱{{ entry.order.total }}</span>
+                  </div>
+                  <div class="order-items">
+                    @for (item of entry.order.items; track item.item._id) {
+                      <span class="order-item-tag">{{ item.item.name }} x{{ item.quantity }}</span>
+                    }
+                  </div>
+                  <div class="order-actions">
+                    <button class="mark-done-btn" (click)="markOrderDone(entry.order._id)">
+                      ✓ Mark as Done
+                    </button>
+                  </div>
+                </div>
+              }
+            }
+          </div>
+  
+          <!-- DONE ORDERS -->
+          <div class="dashboard-section">
+            <h2>✅ Done Orders <span class="count-pill green">{{ doneOrders().length }} completed</span></h2>
+            @if (doneOrders().length === 0) {
+              <p class="empty-msg">Orders marked as done will appear here.</p>
+            } @else {
+              @for (entry of doneOrders(); track entry.order._id) {
+                <div class="order-card done">
+                  <div class="order-header">
+                    <span class="order-id">Order #{{ entry.index }}</span>
+                    <span class="badge yellow">{{ entry.order.transactionMode }}</span>
+                    <span class="badge red">{{ entry.order.paymentMode }}</span>
+                    <span class="order-total">₱{{ entry.order.total }}</span>
+                  </div>
+                  <div class="order-items">
+                    @for (item of entry.order.items; track item.item._id) {
+                      <span class="order-item-tag">{{ item.item.name }} x{{ item.quantity }}</span>
+                    }
+                  </div>
+                  <div class="order-actions between">
+                    <span class="done-tag">✓ Done</span>
+                    <button class="undo-btn" (click)="undoOrderDone(entry.order._id)">Undo</button>
+                  </div>
+                </div>
+              }
+            }
+          </div>
+  
+        </div>
+      </div>
+    }
+  
+  </div>

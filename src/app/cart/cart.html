@@ -1,0 +1,46 @@
+<div class="cart-container">
+    <h1 class="cart-title">🛒 Your Order</h1>
+  
+    @if (orderPlaced()) {
+      <div class="order-success">
+        <div class="success-emoji">🎉</div>
+        <h2>Order Placed!</h2>
+        <p>Salamat sa iyong order! Your Chut Chut order is being prepared.</p>
+        <a routerLink="/menu" class="back-btn">Order More</a>
+      </div>
+    } @else if (cartService.cartItems().length === 0) {
+      <div class="empty-cart">
+        <div class="empty-emoji">🛒</div>
+        <h2>Your cart is empty</h2>
+        <p>Go to the menu and add some items!</p>
+        <a routerLink="/menu" class="back-btn">Browse Menu</a>
+      </div>
+    } @else {
+      <div class="cart-items">
+        @for (entry of cartService.cartItems(); track entry.item._id) {
+          <div class="cart-item">
+            <img [src]="entry.item.image" [alt]="entry.item.name" class="cart-item-img" />
+            <div class="cart-item-info">
+              <h3>{{ entry.item.name }}</h3>
+              <p>₱{{ entry.item.price }} x {{ entry.quantity }}</p>
+            </div>
+            <div class="cart-item-right">
+              <span class="cart-item-total">₱{{ entry.item.price * entry.quantity }}</span>
+              <button class="remove-btn" (click)="cartService.removeFromCart(entry.item._id)">✕</button>
+            </div>
+          </div>
+        }
+      </div>
+  
+      <div class="cart-summary">
+        <div class="total-row">
+          <span>Total</span>
+          <span class="total-amount">₱{{ cartService.cartTotal() }}</span>
+        </div>
+        <div class="cart-actions">
+          <button class="clear-btn" (click)="cartService.clearCart()">🗑️ Clear Cart</button>
+          <button class="place-btn" (click)="placeOrder()">✅ Place Order</button>
+        </div>
+      </div>
+    }
+  </div>

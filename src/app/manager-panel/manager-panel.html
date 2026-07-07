@@ -1,0 +1,452 @@
+<div class="admin-container">
+
+    <!-- HEADER -->
+    <div class="admin-header">
+      <div class="admin-brand">
+        <img src="chutchut.jpg" alt="Chut Chut" class="admin-logo" width="60" height="60" />
+        <div>
+          <h1>Manager Panel</h1>
+          <p>{{ cartService.kioskSettings().kioskName }} — System Management</p>
+        </div>
+      </div>
+      <button class="logout-btn" (click)="logout()">Logout</button>
+    </div>
+  
+    <!-- TABS -->
+    <div class="admin-tabs">
+      <button class="tab-btn" [class.active]="activeTab() === 'dashboard'" (click)="activeTab.set('dashboard')">Dashboard</button>
+      <button class="tab-btn" [class.active]="activeTab() === 'history'"   (click)="activeTab.set('history')">Sales History</button>
+      <button class="tab-btn" [class.active]="activeTab() === 'menu'"      (click)="activeTab.set('menu')">Menu</button>
+      <button class="tab-btn" [class.active]="activeTab() === 'staff'"     (click)="activeTab.set('staff')">Staff</button>
+      <button class="tab-btn" [class.active]="activeTab() === 'settings'"  (click)="activeTab.set('settings')">Settings</button>
+      <button class="tab-btn" [class.active]="activeTab() === 'accounts'"  (click)="activeTab.set('accounts')">Accounts</button>
+    </div>
+  
+    @if (successMsg()) {
+      <div class="success-msg">✅ {{ successMsg() }}</div>
+    }
+  
+    <!-- ══ DASHBOARD TAB ══ -->
+    @if (activeTab() === 'dashboard') {
+      <div class="tab-content">
+        <div class="summary-cards">
+          <div class="summary-card yellow">
+            <p class="summary-label">Total Sales Today</p>
+            <p class="summary-value">₱{{ cartService.todaySales() }}</p>
+          </div>
+          <div class="summary-card red">
+            <p class="summary-label">Total Orders Today</p>
+            <p class="summary-value">{{ cartService.todayOrderCount() }}</p>
+          </div>
+          <div class="summary-card cream">
+            <p class="summary-label">Unique Items Sold</p>
+            <p class="summary-value">{{ itemSales().length }}</p>
+          </div>
+        </div>
+  
+        <div class="dashboard-grid">
+          <div class="dashboard-section">
+            <h2>📋 Orders Breakdown</h2>
+            @if (cartService.completedOrders().length === 0) {
+              <p class="empty-msg">No orders yet today.</p>
+            } @else {
+              @for (order of cartService.completedOrders(); track order._id) {
+                <div class="order-card">
+                  <div class="order-header">
+                    <span class="order-id">Order #{{ order._id }}</span>
+                    <span class="badge yellow">{{ order.transactionMode }}</span>
+                    <span class="badge red">{{ order.paymentMode }}</span>
+                    <span class="order-total">₱{{ order.total }}</span>
+                  </div>
+                  <div class="order-items">
+                    @for (entry of order.items; track entry.item._id) {
+                      <span class="order-item-tag">{{ entry.item.name }} x{{ entry.quantity }}</span>
+                    }
+                  </div>
+                </div>
+              }
+            }
+          </div>
+  
+          <div class="dashboard-section">
+            <h2>📦 Quantity Sold</h2>
+            @if (itemSales().length === 0) {
+              <p class="empty-msg">No items sold yet.</p>
+            } @else {
+              @for (item of itemSales(); track item.name) {
+                <div class="inventory-item">
+                  <img [src]="item.image" [alt]="item.name" class="inventory-img" />
+                  <div class="inventory-info">
+                    <p class="inventory-name">{{ item.name }}</p>
+                    <p class="inventory-qty">{{ item.qty }} sold</p>
+                  </div>
+                  <span class="inventory-total">₱{{ item.total }}</span>
+                </div>
+              }
+            }
+          </div>
+        </div>
+  
+        <div class="breakdown-grid">
+          <div class="breakdown-card">
+            <h2><img src="transaction.png" alt="Transaction" class="icon-h2"> Transaction Breakdown</h2>
+            <div class="breakdown-items">
+              <div class="breakdown-item">
+                <span><img src="dine-in.png" alt="Dine In" class="icon-sm"> Dine In</span>
+                <span class="breakdown-count">{{ transactionBreakdown().dineIn }} orders</span>
+              </div>
+              <div class="breakdown-item">
+                <span><img src="takeout.png" alt="Take Out" class="icon-sm"> Take Out</span>
+                <span class="breakdown-count">{{ transactionBreakdown().takeOut }} orders</span>
+              </div>
+              <div class="breakdown-item">
+                <span><img src="grab.png" alt="Grab" class="icon-sm"> Grab</span>
+                <span class="breakdown-count">{{ transactionBreakdown().grab }} orders</span>
+              </div>
+            </div>
+          </div>
+          <div class="breakdown-card">
+            <h2><img src="transaction.png" alt="Payment" class="icon-h2"> Payment Breakdown</h2>
+            <div class="breakdown-items">
+              <div class="breakdown-item">
+                <span><img src="cash.png" alt="Cash" class="icon-sm"> Cash</span>
+                <span class="breakdown-count">{{ paymentBreakdown().cash }} orders</span>
+              </div>
+              <div class="breakdown-item">
+                <span><img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm"> Gcash/Maya</span>
+                <span class="breakdown-count">{{ paymentBreakdown().gcashmaya }} orders</span>
+              </div>
+            </div>
+          </div>
+        </div>
+  
+        <div class="reset-section">
+          <button class="reset-btn" (click)="resetSales()">🗑️ Reset Today's Sales</button>
+        </div>
+      </div>
+    }
+  
+    <!-- ══ SALES HISTORY TAB ══ -->
+    @if (activeTab() === 'history') {
+      <div class="tab-content">
+  
+        <div class="section-header">
+          <h2>📅 Sales History</h2>
+          <div class="history-actions">
+            <!-- Refresh pulls the latest from DB including any new employee orders -->
+            <button class="add-btn-primary" (click)="refreshHistory()">🔄 Refresh</button>
+            <!-- Export full backup as multi-sheet Excel -->
+            <button class="export-btn" (click)="exportBackup()" [disabled]="cartService.exportLoading()">
+              {{ cartService.exportLoading() ? 'Exporting...' : '📥 Export Excel' }}
+            </button>
+          </div>
+        </div>
+  
+        @if (cartService.salesHistory().length === 0) {
+          <p class="empty-msg">No sales history yet. Orders will appear here once placed.</p>
+        } @else {
+          @for (day of cartService.salesHistory(); track day.date) {
+            <div class="history-card">
+  
+              <!-- Day header — click to expand/collapse -->
+              <div class="history-header" (click)="toggleDay(day.date)">
+                <div class="history-date-block">
+                  <span class="history-date">📅 {{ day.date }}</span>
+                  <span class="badge yellow">{{ day.totalOrders }} orders</span>
+                </div>
+                <div class="history-total-block">
+                  <span class="history-total">₱{{ day.totalSales }}</span>
+                  <span class="history-chevron">{{ expandedDate() === day.date ? '▲' : '▼' }}</span>
+                </div>
+              </div>
+  
+              <!-- Expanded detail -->
+              @if (expandedDate() === day.date) {
+                <div class="history-detail">
+  
+                  <div class="breakdown-grid">
+                    <div class="breakdown-card">
+                      <h3>Transactions</h3>
+                      <div class="breakdown-items">
+                        <div class="breakdown-item">
+                          <span>Dine In</span>
+                          <span class="breakdown-count">{{ day.transactions.dineIn }}</span>
+                        </div>
+                        <div class="breakdown-item">
+                          <span>Take Out</span>
+                          <span class="breakdown-count">{{ day.transactions.takeOut }}</span>
+                        </div>
+                        <div class="breakdown-item">
+                          <span>Grab</span>
+                          <span class="breakdown-count">{{ day.transactions.grab }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="breakdown-card"> 
+                      <h3>Payments</h3>
+                      <div class="breakdown-items">
+                        <div class="breakdown-item">
+                          <span>Cash</span>
+                          <span class="breakdown-count">{{ day.payments.cash }}</span>
+                        </div>
+                        <div class="breakdown-item">
+                          <span>Gcash/Maya</span>
+                          <span class="breakdown-count">{{ day.payments.online }}</span>
+                        </div>
+                        <div class="breakdown-item">
+                          <span>Grab Pay</span>
+                          <span class="breakdown-count">{{ day.payments.grab }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Individual orders for that day -->
+                  <div class="history-orders">
+                    <h3>📋 Orders</h3>
+                    @for (order of day.orders; track order._id; let i = $index) {
+                      <div class="order-card">
+                        <div class="order-header">
+                          <span class="order-id">Order #{{ i + 1 }}</span>
+                          <span class="badge yellow">{{ order.transactionMode }}</span>
+                          <span class="badge red">{{ order.paymentMode }}</span>
+                          <span class="order-total">₱{{ order.total }}</span>
+                        </div>
+                        <div class="order-items">
+                          @for (entry of order.items; track entry.item._id) {
+                            <span class="order-item-tag">{{ entry.item.name }} x{{ entry.quantity }}</span>
+                          }
+                        </div>
+                      </div>
+                    }
+                  </div>
+  
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+    }
+  
+    <!-- ══ MENU TAB ══ -->
+    @if (activeTab() === 'menu') {
+      <div class="tab-content">
+        <div class="section-header">
+          <h2>Menu Management</h2>
+          <button class="add-btn-primary" (click)="startAddItem()">+ Add Item</button>
+        </div>
+  
+        @if (showMenuForm()) {
+          <div class="form-card">
+            <h3>{{ editingItem() ? 'Edit Item' : 'Add New Item' }}</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" class="form-input" [value]="newItem().name"
+                  (input)="updateNewItem('name', $any($event.target).value)" placeholder="Item name" />
+              </div>
+              <div class="form-group">
+                <label>Price (₱)</label>
+                <input type="number" class="form-input" [value]="newItem().price"
+                  (input)="updateNewItem('price', +$any($event.target).value)" placeholder="0" />
+              </div>
+              <div class="form-group">
+                <label>Category</label>
+                <select class="form-input" [value]="newItem().category"
+                  (change)="updateNewItem('category', $any($event.target).value)">
+                  <option value="">Select category</option>
+                  <option value="Wings & Rice">Wings & Rice</option>
+                  <option value="Wings & Fries">Wings & Fries</option>
+                  <option value="Wings & Gravy">Wings & Gravy</option>
+                  <option value="Wings & Drinks">Wings & Drinks</option>
+                  <option value="Combos">Combos</option>
+                  <option value="Fries">Fries</option>
+                  <option value="Corndog">Corndog</option>
+                  <option value="Chillers">Chillers</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Image filename</label>
+                <input type="text" class="form-input" [value]="newItem().image"
+                  (input)="updateNewItem('image', $any($event.target).value)" placeholder="e.g. wings-rice.jpg" />
+              </div>
+              <div class="form-group full-width">
+                <label>Description</label>
+                <input type="text" class="form-input" [value]="newItem().description"
+                  (input)="updateNewItem('description', $any($event.target).value)" placeholder="Short description" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="cancel-btn" (click)="cancelMenuForm()">Cancel</button>
+              <button class="save-btn" (click)="saveItem()">{{ editingItem() ? 'Save Changes' : 'Add Item' }}</button>
+            </div>
+          </div>
+        }
+  
+        <div class="menu-grid">
+          @for (item of cartService.menuItems(); track item._id) {
+            <div class="menu-card">
+              <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
+              <div class="menu-card-info">
+                <p class="menu-card-name">{{ item.name }}</p>
+                <p class="menu-card-cat">{{ item.category }}</p>
+                <p class="menu-card-price">₱{{ item.price }}</p>
+              </div>
+              <div class="menu-card-actions">
+                <button class="edit-btn" (click)="startEditItem(item)">✏️ Edit</button>
+                <button class="delete-btn" (click)="deleteItem(item._id)">🗑️ Delete</button>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  
+    <!-- ══ STAFF TAB ══ -->
+    @if (activeTab() === 'staff') {
+      <div class="tab-content">
+        <div class="section-header">
+          <h2>👥 Staff Management</h2>
+          <button class="add-btn-primary" (click)="startAddStaff()">+ Add Staff</button>
+        </div>
+  
+        @if (showStaffForm()) {
+          <div class="form-card">
+            <h3>{{ editingStaff() ? 'Edit Staff' : 'Add New Staff' }}</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Staff Code</label>
+                <input type="text" class="form-input" [value]="newStaff().staffCode"
+                  (input)="updateNewStaff('staffCode', $any($event.target).value)" placeholder="e.g. EMP003" />
+              </div>
+              <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" class="form-input" [value]="newStaff().name"
+                  (input)="updateNewStaff('name', $any($event.target).value)" placeholder="Full name" />
+              </div>
+              <div class="form-group">
+                <label>Contact Number</label>
+                <input type="text" class="form-input" [value]="newStaff().contact"
+                  (input)="updateNewStaff('contact', $any($event.target).value)" placeholder="09XXXXXXXXX" />
+              </div>
+              <div class="form-group">
+                <label>Status</label>
+                <select class="form-input" [value]="newStaff().status"
+                  (change)="updateNewStaff('status', $any($event.target).value)">
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="text" class="form-input" [value]="newStaff().password"
+                  (input)="updateNewStaff('password', $any($event.target).value)" placeholder="Login password" />
+              </div>
+              <div class="form-group">
+                <label>Date Added</label>
+                <input type="date" class="form-input" [value]="newStaff().dateAdded"
+                  (input)="updateNewStaff('dateAdded', $any($event.target).value)" />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="cancel-btn" (click)="cancelStaffForm()">Cancel</button>
+              <button class="save-btn" (click)="saveStaff()">{{ editingStaff() ? 'Save Changes' : 'Add Staff' }}</button>
+            </div>
+          </div>
+        }
+  
+        <div class="staff-table">
+          <div class="staff-table-header">
+            <span>Code</span><span>Name</span><span>Contact</span>
+            <span>Status</span><span>Date Added</span><span>Actions</span>
+          </div>
+          @for (staff of cartService.staffList(); track staff._id) {
+            <div class="staff-table-row">
+              <span class="staff-name">{{ staff.staffCode }}</span>
+              <span class="staff-name">{{ staff.name }}</span>
+              <span class="staff-contact">{{ staff.contact }}</span>
+              <span>
+                <span class="status-badge" [class.inactive]="staff.status === 'Inactive'">{{ staff.status }}</span>
+              </span>
+              <span class="staff-date">{{ staff.dateAdded }}</span>
+              <span class="staff-actions">
+                <button class="edit-btn" (click)="startEditStaff(staff)">✏️</button>
+                <button class="delete-btn" (click)="cartService.removeStaff(staff._id)">🗑️</button>
+              </span>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  
+    <!-- ══ SETTINGS TAB ══ -->
+    @if (activeTab() === 'settings') {
+      <div class="tab-content">
+        <div class="settings-grid">
+  
+          <div class="settings-card">
+            <h1> Transaction Modes</h1>
+            <p class="settings-desc">Toggle which transaction modes are available to employees</p>
+            <div class="toggle-list">
+              @for (mode of allTransactionModes; track mode) {
+                <div class="toggle-item">
+                  <span class="toggle-label">{{ mode }}</span>
+                  <button class="toggle-btn" [class.on]="isTransactionEnabled(mode)" (click)="toggleTransaction(mode)">
+                    {{ isTransactionEnabled(mode) ? 'ON' : 'OFF' }}
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+  
+          <div class="settings-card">
+            <h1> Payment Modes</h1>
+            <p class="settings-desc">Toggle which payment methods are available</p>
+            <div class="toggle-list">
+              @for (mode of allPaymentModes; track mode) {
+                <div class="toggle-item">
+                  <span class="toggle-label">{{ mode }}</span>
+                  <button class="toggle-btn" [class.on]="isPaymentEnabled(mode)" (click)="togglePayment(mode)">
+                    {{ isPaymentEnabled(mode) ? 'ON' : 'OFF' }}
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+  
+          <!-- BACKUP EXPORT — full system data as 4-sheet Excel -->
+          <div class="settings-card">
+            <h2>💾 System Backup</h2>
+            <p class="settings-desc">
+              Downloads a complete Excel backup with 4 sheets:
+              Daily Summary, All Orders, Menu Items, and Staff.
+            </p>
+            <button class="export-btn" (click)="exportBackup()" [disabled]="cartService.exportLoading()">
+              {{ cartService.exportLoading() ? '⏳ Exporting...' : '📥 Export Full Backup (.xlsx)' }}
+            </button>
+          </div>
+  
+        </div>
+      </div>
+    }
+  
+    <!-- ══ ACCOUNTS TAB ══ -->
+    @if (activeTab() === 'accounts') {
+      <div class="tab-content">
+        <div class="settings-grid">
+          <div class="settings-card">
+            <h2>🔐 Manager Password</h2>
+            <p class="settings-desc">Change the shared password used to log in as Manager</p>
+            <div class="password-form">
+              <input type="password" class="password-input" placeholder="New manager password"
+                [value]="newManagerPassword()"
+                (input)="newManagerPassword.set($any($event.target).value)" />
+              <button class="save-pw-btn" (click)="saveManagerPassword()">Save</button>
+            </div>
+            <p class="current-pw">Current: <strong>{{ cartService.kioskSettings().managerPassword }}</strong></p>
+          </div>
+        </div>
+      </div>
+    }
+  
+  </div>

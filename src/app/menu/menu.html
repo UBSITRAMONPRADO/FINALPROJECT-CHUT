@@ -1,0 +1,65 @@
+<div class="menu-container">
+
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <img src="chutchut.jpg" alt="Chut Chut" class="sidebar-logo-img" />
+      </div>
+      @for (cat of categories; track cat) {
+        <button
+          class="sidebar-btn"
+          [class.active]="selectedCategory() === cat"
+          (click)="selectCategory(cat)">
+          <span class="sidebar-label">{{ cat }}</span>
+        </button>
+      }
+    </aside>
+  
+    <div class="menu-main">
+      <div class="menu-header">
+        <h1>{{ selectedCategory() }}</h1>
+        <p>{{ filteredItems().length }} items available</p>
+      </div>
+      <div class="menu-grid">
+        @for (item of filteredItems(); track item._id) {
+          <app-menu-item-card
+            [item]="item"
+            (addToCart)="handleAddToCart($event)">
+          </app-menu-item-card>
+        }
+      </div>
+    </div>
+  
+    <div class="cart-panel">
+      <h2 class="cart-panel-title">🛒 Your Order</h2>
+  
+      @if (cartService.cartItems().length === 0) {
+        <div class="cart-empty">
+          <p>No items yet.</p>
+          <p>Add something from the menu!</p>
+        </div>
+      } @else {
+        <div class="cart-panel-items">
+          @for (entry of cartService.cartItems(); track entry.item._id) {
+            <div class="cart-panel-item">
+              <img [src]="entry.item.image" [alt]="entry.item.name" class="cart-panel-img" />
+              <div class="cart-panel-info">
+                <p class="cart-panel-name">{{ entry.item.name }}</p>
+                <p class="cart-panel-qty">x{{ entry.quantity }}</p>
+              </div>
+              <span class="cart-panel-price">₱{{ entry.item.price * entry.quantity }}</span>
+            </div>
+          }
+        </div>
+        <div class="cart-panel-footer">
+          <div class="cart-panel-total">
+            <span>Total</span>
+            <span class="cart-total-amt">₱{{ cartService.cartTotal() }}</span>
+          </div>
+          <a routerLink="/cart" class="checkout-btn">
+            Order & Pay ₱{{ cartService.cartTotal() }}
+          </a>
+        </div>
+      }
+    </div>
+  
+  </div>
