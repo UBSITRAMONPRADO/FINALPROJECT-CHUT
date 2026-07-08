@@ -1,3 +1,6 @@
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -106,6 +109,12 @@ function getManilaDayBounds(refDate = new Date()) {
 }
 
 // Recomputes one day's summary straight from the Orders collection
+// and upserts it into `dailysales`. Called after every new order and
+// once more (to finalize) right before a daily reset.
+// NOTE: this fully recomputes from whatever orders currently exist for
+// that day — if you reset more than once within the same calendar day,
+// the earlier session's totals get overwritten by the later recompute
+// rather than accumulated. Flag if that matters for your workflow.
 async function upsertDailySales(refDate = new Date()) {
   const { dateStr, start, end } = getManilaDayBounds(refDate);
   const orders = await Order.find({ timestamp: { $gte: start, $lte: end } });
@@ -222,6 +231,11 @@ function groupOrdersByDate(orders) {
 }
 
 // Merges live-computed history (from whatever is still in `orders`) with
+// any persisted `dailysales` days that have NO matching live orders left —
+// i.e. days that got wiped by a reset. Without this, a reset day would
+// vanish from Sales History entirely even though its summary is safely
+// archived in `dailysales`.
+// `orders` here should already be Order.find().sort({ timestamp: 1 }).
 async function getMergedDailyHistory(orders) {
   const liveHistory = groupOrdersByDate(orders);
   const liveDates   = new Set(liveHistory.map(d => d.date));
@@ -365,8 +379,10 @@ app.delete('/api/orders/reset', async (req, res) => {
   res.send({ message: `Cleared ${result.deletedCount} orders from today` });
 });
 
-
+// ══════════════════════════════════════════
 //  DAILY SALES ENDPOINTS
+// ══════════════════════════════════════════
+
 // GET all persisted daily summaries, newest first
 app.get('/api/dailysales', async (req, res) => {
   const rows = await DailySales.find().sort({ date: -1 });
@@ -380,7 +396,10 @@ app.get('/api/dailysales/:date', async (req, res) => {
   res.send(row);
 });
 
+// ══════════════════════════════════════════
 //  KIOSK SETTINGS ENDPOINTS
+// ══════════════════════════════════════════
+
 app.get('/api/settings', async (req, res) => {
   let settings = await KioskSettings.findOne();
   if (!settings) { settings = new KioskSettings(); await settings.save(); }
@@ -404,6 +423,10 @@ app.put('/api/settings', async (req, res) => {
 // ══════════════════════════════════════════
 
 // GET /api/backup
+// Returns ALL system data in one payload.
+// Angular uses SheetJS to convert this into a multi-sheet Excel file client-side.
+// Sheets: Orders (flat rows), Daily Summary, Menu Items, Staff
+
 app.get('/api/backup', async (req, res) => {
   const [orders, menu, staff] = await Promise.all([
     Order.find().sort({ timestamp: 1 }),
@@ -412,6 +435,8 @@ app.get('/api/backup', async (req, res) => {
   ]);
 
   // Sheet 1 — Orders: one row per item line within each order
+  // (only covers whatever orders currently still exist — reset days
+  // have no raw order rows left, same as in Sales History)
   const orderRows = [];
   orders.forEach(order => {
     const date = new Date(order.timestamp)
@@ -534,7 +559,6 @@ app.post('/api/seed', async (req, res) => {
 });
 
 // ── START SERVER ──
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Chut Chut server is running on port ${PORT}`);
+app.listen(3000, () => {
+  console.log('Chut Chut server is running on port 3000');
 });
