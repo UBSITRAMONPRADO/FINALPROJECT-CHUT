@@ -13,7 +13,7 @@ export class LandingComponent {
   private router = inject(Router);
   private http = inject(HttpClient);
   private cartService = inject(CartServices);
-  private api = 'http://localhost:3000/api';
+  private api = 'https://finalproject-chut-2.onrender.com/api';
 
   staffCode = signal('');
   password = signal('');
