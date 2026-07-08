@@ -121,112 +121,116 @@
         </div>
   
         <div class="reset-section">
-          <button class="reset-btn" (click)="resetSales()">🗑️ Reset Today's Sales</button>
+          <button class="reset-btn" (click)="resetSales()"> Reset Today's Sales</button>
         </div>
       </div>
     }
   
-    <!-- ══ SALES HISTORY TAB ══ -->
-    @if (activeTab() === 'history') {
-      <div class="tab-content">
-  
-        <div class="section-header">
-          <h2>📅 Sales History</h2>
-          <div class="history-actions">
-            <!-- Refresh pulls the latest from DB including any new employee orders -->
-            <button class="add-btn-primary" (click)="refreshHistory()">🔄 Refresh</button>
-            <!-- Export full backup as multi-sheet Excel -->
-            <button class="export-btn" (click)="exportBackup()" [disabled]="cartService.exportLoading()">
-              {{ cartService.exportLoading() ? 'Exporting...' : '📥 Export Excel' }}
-            </button>
-          </div>
+<!-- ══ SALES HISTORY TAB ══ -->
+@if (activeTab() === 'history') {
+  <div class="tab-content">
+
+    <div class="history-toolbar">
+      <div class="history-title-block">
+        <h2>📅 Sales History</h2>
+        <p class="history-subtitle">Track performance by day, week, month, or year</p>
+      </div>
+
+      <div class="history-controls">
+        <div class="view-toggle">
+          <button class="view-btn" [class.active]="historyView() === 'daily'"   (click)="setHistoryView('daily')">Daily</button>
+          <button class="view-btn" [class.active]="historyView() === 'weekly'"  (click)="setHistoryView('weekly')">Weekly</button>
+          <button class="view-btn" [class.active]="historyView() === 'monthly'" (click)="setHistoryView('monthly')">Monthly</button>
+          <button class="view-btn" [class.active]="historyView() === 'yearly'"  (click)="setHistoryView('yearly')">Yearly</button>
         </div>
-  
-        @if (cartService.salesHistory().length === 0) {
-          <p class="empty-msg">No sales history yet. Orders will appear here once placed.</p>
-        } @else {
-          @for (day of cartService.salesHistory(); track day.date) {
-            <div class="history-card">
-  
-              <!-- Day header — click to expand/collapse -->
-              <div class="history-header" (click)="toggleDay(day.date)">
-                <div class="history-date-block">
-                  <span class="history-date">📅 {{ day.date }}</span>
-                  <span class="badge yellow">{{ day.totalOrders }} orders</span>
+
+        <div class="history-actions">
+          <button class="icon-btn" (click)="refreshHistory()" title="Refresh">🔄</button>
+          <button class="export-btn" (click)="exportBackup()" [disabled]="cartService.exportLoading()">
+            {{ cartService.exportLoading() ? 'Exporting...' : '📥 Export Excel' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    @if (groupedHistory().length === 0) {
+      <p class="empty-msg">No sales history yet. Orders will appear here once placed.</p>
+    } @else {
+      @for (group of groupedHistory(); track group.key) {
+        <div class="history-card">
+
+          <div class="history-header" (click)="toggleGroup(group.key)">
+            <div class="history-date-block">
+              <span class="history-date">{{ group.label }}</span>
+              <span class="badge yellow">{{ group.totalOrders }} orders</span>
+            </div>
+            <div class="history-total-block">
+              <span class="history-total">₱{{ group.totalSales }}</span>
+              <span class="history-chevron">{{ expandedGroup() === group.key ? '▲' : '▼' }}</span>
+            </div>
+          </div>
+
+          @if (expandedGroup() === group.key) {
+            <div class="history-detail">
+
+              <div class="breakdown-grid">
+                <div class="breakdown-card">
+                  <h3>Transactions</h3>
+                  <div class="breakdown-items">
+                    <div class="breakdown-item"><span>Dine In</span><span class="breakdown-count">{{ group.transactions.dineIn }}</span></div>
+                    <div class="breakdown-item"><span>Take Out</span><span class="breakdown-count">{{ group.transactions.takeOut }}</span></div>
+                    <div class="breakdown-item"><span>Grab</span><span class="breakdown-count">{{ group.transactions.grab }}</span></div>
+                  </div>
                 </div>
-                <div class="history-total-block">
-                  <span class="history-total">₱{{ day.totalSales }}</span>
-                  <span class="history-chevron">{{ expandedDate() === day.date ? '▲' : '▼' }}</span>
+                <div class="breakdown-card">
+                  <h3>Payments</h3>
+                  <div class="breakdown-items">
+                    <div class="breakdown-item"><span>Cash</span><span class="breakdown-count">{{ group.payments.cash }}</span></div>
+                    <div class="breakdown-item"><span>Gcash/Maya</span><span class="breakdown-count">{{ group.payments.online }}</span></div>
+                    <div class="breakdown-item"><span>Grab Pay</span><span class="breakdown-count">{{ group.payments.grab }}</span></div>
+                  </div>
                 </div>
               </div>
-  
-              <!-- Expanded detail -->
-              @if (expandedDate() === day.date) {
-                <div class="history-detail">
-  
-                  <div class="breakdown-grid">
-                    <div class="breakdown-card">
-                      <h3>Transactions</h3>
-                      <div class="breakdown-items">
-                        <div class="breakdown-item">
-                          <span>Dine In</span>
-                          <span class="breakdown-count">{{ day.transactions.dineIn }}</span>
-                        </div>
-                        <div class="breakdown-item">
-                          <span>Take Out</span>
-                          <span class="breakdown-count">{{ day.transactions.takeOut }}</span>
-                        </div>
-                        <div class="breakdown-item">
-                          <span>Grab</span>
-                          <span class="breakdown-count">{{ day.transactions.grab }}</span>
-                        </div>
-                      </div>
+
+              @if (group.days.length > 1) {
+                <div class="daily-breakdown">
+                  <h3>📆 Daily Breakdown</h3>
+                  @for (d of group.days; track d.date) {
+                    <div class="daily-row">
+                      <span class="daily-date">{{ d.date }}</span>
+                      <span class="daily-orders">{{ d.totalOrders }} orders</span>
+                      <span class="daily-sales">₱{{ d.totalSales }}</span>
                     </div>
-                    <div class="breakdown-card"> 
-                      <h3>Payments</h3>
-                      <div class="breakdown-items">
-                        <div class="breakdown-item">
-                          <span>Cash</span>
-                          <span class="breakdown-count">{{ day.payments.cash }}</span>
-                        </div>
-                        <div class="breakdown-item">
-                          <span>Gcash/Maya</span>
-                          <span class="breakdown-count">{{ day.payments.online }}</span>
-                        </div>
-                        <div class="breakdown-item">
-                          <span>Grab Pay</span>
-                          <span class="breakdown-count">{{ day.payments.grab }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <!-- Individual orders for that day -->
-                  <div class="history-orders">
-                    <h3>📋 Orders</h3>
-                    @for (order of day.orders; track order._id; let i = $index) {
-                      <div class="order-card">
-                        <div class="order-header">
-                          <span class="order-id">Order #{{ i + 1 }}</span>
-                          <span class="badge yellow">{{ order.transactionMode }}</span>
-                          <span class="badge red">{{ order.paymentMode }}</span>
-                          <span class="order-total">₱{{ order.total }}</span>
-                        </div>
-                        <div class="order-items">
-                          @for (entry of order.items; track entry.item._id) {
-                            <span class="order-item-tag">{{ entry.item.name }} x{{ entry.quantity }}</span>
-                          }
-                        </div>
-                      </div>
-                    }
-                  </div>
-  
+                  }
                 </div>
               }
+
+              <div class="history-orders">
+                <h3>📋 Orders</h3>
+                @for (order of group.orders; track order._id; let i = $index) {
+                  <div class="order-card">
+                    <div class="order-header">
+                      <span class="order-id">Order #{{ i + 1 }}</span>
+                      <span class="badge yellow">{{ order.transactionMode }}</span>
+                      <span class="badge red">{{ order.paymentMode }}</span>
+                      <span class="order-total">₱{{ order.total }}</span>
+                    </div>
+                    <div class="order-items">
+                      @for (entry of order.items; track entry.item._id) {
+                        <span class="order-item-tag">{{ entry.item.name }} x{{ entry.quantity }}</span>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+
             </div>
           }
-        }
-      </div>
+        </div>
+      }
     }
+  </div>
+}
   
     <!-- ══ MENU TAB ══ -->
     @if (activeTab() === 'menu') {
