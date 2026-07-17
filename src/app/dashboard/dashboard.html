@@ -14,11 +14,11 @@
           <div class="on-duty-ring"></div>  
           <div class="on-duty-dot"></div>
         </div>
-        <div class="on-duty-info">
+       <div class="on-duty-info">
           <p class="on-duty-label">On Duty</p>
           <p class="on-duty-name">{{ currentStaff()?.name ?? 'Unknown' }}</p>
-          <p class="on-duty-role">{{ currentStaff()?.staffCode ?? '' }}</p>
-        </div>
+          <p class="on-duty-role">{{ currentStaff()?.staffCode ?? '' }} · {{ currentStaff()?.branch ?? '' }}</p>
+       </div>
       </div>
   
       <button class="logout-btn" (click)="logout()">Logout</button>
@@ -32,9 +32,6 @@
       <button class="tab-btn" [class.active]="activeTab() === 'new-order'" (click)="activeTab.set('new-order')">
         New Order
       </button>
-      <button class="tab-btn" [class.active]="activeTab() === 'menu'" (click)="activeTab.set('menu')">
-        Menu
-      </button>
       <button class="tab-btn" [class.active]="activeTab() === 'orders'" (click)="activeTab.set('orders')">
         OrdersList
       </button>
@@ -44,13 +41,13 @@
     @if (activeTab() === 'sales') {
       <div class="tab-content">
         <div class="summary-cards">
-          <div class="summary-card yellow">
+         <div class="summary-card yellow">
+            <p class="summary-value">&#8369;{{ todaySalesNet() }}</p>
             <p class="summary-label">Total Sales Today</p>
-            <p class="summary-value">&#8369;{{ cartService.todaySales() }}</p>
           </div>
           <div class="summary-card red">
             <p class="summary-label">Total Orders Today</p>
-            <p class="summary-value">{{ cartService.todayOrderCount() }}</p>
+            <p class="summary-value">{{ todayOrderCountNet() }}</p>
           </div>
           <div class="summary-card cream">
             <p class="summary-label">Items Sold</p>
@@ -102,15 +99,10 @@
               </div>
               <div class="breakdown-item">
                 <span><img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm"> Gcash/Maya</span>
-                <span class="breakdown-count">{{ paymentBreakdown().online }} orders</span>
+                <span class="breakdown-count">{{ paymentBreakdown().gcashmaya }} orders</span>
               </div>
             </div>
           </div>
-        </div>
-        <div class="reset-section">
-          <button class="reset-btn" (click)="cartService.resetDailySales()">
-            Reset Daily Sales
-          </button>
         </div>
       </div>
     }
@@ -126,17 +118,14 @@
               <button class="step-btn" (click)="selectTransaction('Dine In')">
                 <span><img src="dine-in.png" alt="Dine In" class="icon-sm"></span>
                 <span class="step-label">Dine In</span>
-                <span class="step-desc">Eat here at the store</span>
               </button>
               <button class="step-btn" (click)="selectTransaction('Take Out')">
                 <span><img src="takeout.png" alt="Take Out" class="icon-sm"></span>
                 <span class="step-label">Take Out</span>
-                <span class="step-desc">Bring your order home</span>
               </button>
               <button class="step-btn" (click)="selectTransaction('Grab')">
                 <span><img src="grab.png" alt="Grab" class="icon-sm"></span>
                 <span class="step-label">Grab</span>
-                <span class="step-desc">Order via delivery</span>
               </button>
             </div>
           </div>
@@ -227,84 +216,7 @@
   
       </div>
     }
-  
-    <!-- MENU TAB -->
-    @if (activeTab() === 'menu') {
-      <div class="tab-content">
-        <div class="section-header">
-          <h2>Menu Management</h2>
-          <button class="add-btn-primary" (click)="startAddItem()">+ Add Item</button>
-        </div>
-  
-        @if (showMenuForm()) {
-          <div class="form-card">
-            <h3>{{ editingItem() ? 'Edit Item' : 'Add New Item' }}</h3>
-            <div class="form-grid">
-              <div class="form-group">
-                <label>Name</label>
-                <input type="text" class="form-input"
-                  [value]="newItem().name"
-                  (input)="updateNewItem('name', $any($event.target).value)"
-                  placeholder="Item name" />
-              </div>
-              <div class="form-group">
-                <label>Price (₱)</label>
-                <input type="number" class="form-input"
-                  [value]="newItem().price"
-                  (input)="updateNewItem('price', +$any($event.target).value)"
-                  placeholder="0" />
-              </div>
-              <div class="form-group">
-                <label>Category</label>
-                <select class="form-input"
-                  [value]="newItem().category"
-                  (change)="updateNewItem('category', $any($event.target).value)">
-                  <option value="">Select category</option>
-                  <option value="Wings & Rice">Wings & Rice</option>
-                  <option value="Wings & Fries">Wings & Fries</option>
-                  <option value="Wings & Gravy">Wings & Gravy</option>
-                  <option value="Wings & Drinks">Wings & Drinks</option>
-                  <option value="Combos">Combos</option>
-                  <option value="Fries">Fries</option>
-                  <option value="Corndog">Corndog</option>
-                  <option value="Chillers">Chillers</option>
-                </select>
-              </div>
-              <div class="form-group full-width">
-                <label>Description</label>
-                <input type="text" class="form-input"
-                  [value]="newItem().description"
-                  (input)="updateNewItem('description', $any($event.target).value)"
-                  placeholder="Short description" />
-              </div>
-            </div>
-            <div class="form-actions">
-              <button class="cancel-btn" (click)="cancelMenuForm()">Cancel</button>
-              <button class="save-btn" (click)="saveItem()">
-                {{ editingItem() ? 'Save Changes' : 'Add Item' }}
-              </button>
-            </div>
-          </div>
-        }
-  
-        <div class="menu-grid">
-          @for (item of cartService.menuItems(); track item._id) {
-            <div class="menu-card">
-              <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
-              <div class="menu-card-info">
-                <p class="menu-card-name">{{ item.name }}</p>
-                <p class="menu-card-cat">{{ item.category }}</p>
-                <p class="menu-card-price">₱{{ item.price }}</p>
-              </div>
-              <div class="menu-card-actions">
-                <button class="edit-btn" (click)="startEditItem(item)">✏️ Edit</button>
-                <button class="delete-btn" (click)="deleteItem(item._id)">🗑️ Delete</button>
-              </div>
-            </div>
-          }
-        </div>
-      </div>
-    }
+
   
     <!-- ORDERS TAB -->
     @if (activeTab() === 'orders') {
@@ -315,9 +227,10 @@
   
         <div class="dashboard-grid">
   
+        
           <!-- PENDING ORDERS -->
           <div class="dashboard-section">
-            <h2>📋 Orders Breakdown <span class="count-pill red">{{ pendingOrders().length }} pending</span></h2>
+            <h2> Orders Breakdown <span class="count-pill red">{{ pendingOrders().length }} pending</span></h2>
             @if (pendingOrders().length === 0) {
               <p class="empty-msg">No pending orders.</p>
             } @else {
@@ -338,15 +251,18 @@
                     <button class="mark-done-btn" (click)="markOrderDone(entry.order._id)">
                       ✓ Mark as Done
                     </button>
+                    <button class="cancel-order-btn" (click)="markOrderCancelled(entry.order._id)">
+                      ✕ Cancel
+                    </button>
                   </div>
-                </div>
+                  </div>
+                }
               }
-            }
           </div>
-  
+                    
           <!-- DONE ORDERS -->
           <div class="dashboard-section">
-            <h2>✅ Done Orders <span class="count-pill green">{{ doneOrders().length }} completed</span></h2>
+            <h2> Done Orders <span class="count-pill green">{{ doneOrders().length }} completed</span></h2>
             @if (doneOrders().length === 0) {
               <p class="empty-msg">Orders marked as done will appear here.</p>
             } @else {
@@ -366,6 +282,34 @@
                   <div class="order-actions between">
                     <span class="done-tag">✓ Done</span>
                     <button class="undo-btn" (click)="undoOrderDone(entry.order._id)">Undo</button>
+                  </div>
+                </div>
+              }
+            }
+          </div>
+
+           <!-- CANCELLED ORDERS -->
+          <div class="dashboard-section">
+            <h2> Cancelled Orders <span class="count-pill grey">{{ cancelledOrders().length }} cancelled</span></h2>
+            @if (cancelledOrders().length === 0) {
+              <p class="empty-msg">No cancelled orders.</p>
+            } @else {
+              @for (entry of cancelledOrders(); track entry.order._id) {
+                <div class="order-card cancelled">
+                  <div class="order-header">
+                    <span class="order-id">Order #{{ entry.index }}</span>
+                    <span class="badge yellow">{{ entry.order.transactionMode }}</span>
+                    <span class="badge red">{{ entry.order.paymentMode }}</span>
+                    <span class="order-total">₱{{ entry.order.total }}</span>
+                  </div>
+                  <div class="order-items">
+                    @for (item of entry.order.items; track item.item._id) {
+                      <span class="order-item-tag">{{ item.item.name }} x{{ item.quantity }}</span>
+                    }
+                  </div>
+                  <div class="order-actions between">
+                    <span class="cancelled-tag">✕ Cancelled</span>
+                    <button class="undo-btn" (click)="undoOrderCancelled(entry.order._id)">Undo</button>
                   </div>
                 </div>
               }
