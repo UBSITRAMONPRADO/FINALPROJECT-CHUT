@@ -23,15 +23,16 @@ export interface CompletedOrder {
   transactionMode: string;
   paymentMode: string;
   timestamp: Date;
+  branch: string;
+  staffname: string;
+  staffid: string;  
 }
 
 export interface Staff {
   _id: string;
   staffCode: string;
   name: string;
-  contact: string;
-  status: 'Active' | 'Inactive';
-  dateAdded: string;
+  branch: 'Harrison Bazaar' | 'Pines Arcade' | 'Porta Vaga';
   password: string;
 }
 
@@ -69,7 +70,7 @@ export interface BackupPayload {
 export class CartServices {
 
   private http = inject(HttpClient);
-  private api = 'https://finalproject-chut-2.onrender.com/api';
+  private api = 'http://localhost:3000/api';
 
   // ── SETTINGS ──
   kioskSettings = signal<KioskSettings>({
@@ -132,11 +133,15 @@ export class CartServices {
     });
   }
 
-  loadTodayOrders(): void {
-    this.http.get<CompletedOrder[]>(`${this.api}/orders/today`).subscribe(orders => {
-      this.completedOrders.set(orders);
-    });
-  }
+loadTodayOrders(): void {
+  const branch = this.currentStaff()?.branch;
+  const url = branch
+    ? `${this.api}/orders/today?branch=${encodeURIComponent(branch)}`
+    : `${this.api}/orders/today`;
+  this.http.get<CompletedOrder[]>(url).subscribe(orders => {
+    this.completedOrders.set(orders);
+  });
+}
 
   loadSettings(): void {
     this.http.get<KioskSettings>(`${this.api}/settings`).subscribe(settings => {
@@ -181,20 +186,27 @@ export class CartServices {
   // ══════════════════════════════════════════
   //  ORDER METHODS
   // ══════════════════════════════════════════
-
   placeOrder(): void {
-    const order = {
-      items:           this.cartItems(),
-      total:           this.cartTotal(),
-      transactionMode: this.transactionMode(),
-      paymentMode:     this.paymentMode(),
-      timestamp:       new Date()
-    };
-    this.http.post<CompletedOrder>(`${this.api}/orders`, order).subscribe(saved => {
-      this.completedOrders.set([...this.completedOrders(), saved]);
-      this.clearCart();
-    });
+  const staff = this.currentStaff();
+  if (!staff) {
+    console.error('Cannot place order: no staff logged in.');
+    return;
   }
+  const order = {
+    items:           this.cartItems(),
+    total:           this.cartTotal(),
+    transactionMode: this.transactionMode(),
+    paymentMode:     this.paymentMode(),
+    timestamp:       new Date(),
+    branch:          staff.branch,
+    staffName:       staff.name,
+    staffId:         staff._id
+  };
+  this.http.post<CompletedOrder>(`${this.api}/orders`, order).subscribe(saved => {
+    this.completedOrders.set([...this.completedOrders(), saved]);
+    this.clearCart();
+  });
+}
 
   // Clears today's orders only — past days remain in DB
   resetDailySales(onComplete?: () => void): void {
@@ -203,6 +215,24 @@ export class CartServices {
       if (onComplete) onComplete();
     });
   }
+
+  // ══════════════════════════════════════════
+//  SYSTEM RESET — wipes orders, sales history, menu items, and staff
+// ══════════════════════════════════════════
+clearAllSystemData(onComplete?: () => void): void {
+  this.http.delete(`${this.api}/system/clear-all`).subscribe({
+    next: () => {
+      this.completedOrders.set([]);
+      this.salesHistory.set([]);
+      this.menuItems.set([]);
+      this.staffList.set([]);
+      if (onComplete) onComplete();
+    },
+    error: (err) => {
+      console.error('Clear all data failed:', err);
+    }
+  });
+}
   // ══════════════════════════════════════════
   //  MENU ITEM METHODS
   // ══════════════════════════════════════════
@@ -322,4 +352,5 @@ export class CartServices {
       }
     });
   }
+
 }
