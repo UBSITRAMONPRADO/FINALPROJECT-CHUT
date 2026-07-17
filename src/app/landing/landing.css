@@ -17,14 +17,15 @@
     width: 100%;
   }
   
-  .landing-logo {
-    width: 140px;
-    height: 140px;
-    object-fit: contain;
-    border-radius: 25%;
-    margin-bottom: 16px;
-  }
-  
+.landing-logo {
+  width: 140px;
+  height: 140px;
+  object-fit: contain;
+  object-position: 30% 50%; /* shift focal point left; tweak the % */
+  border-radius: 25%;
+  margin: 0 auto 16px;
+  display: block;
+}
   .landing-title {
     font-size: 2.4rem;
     font-weight: 900;
