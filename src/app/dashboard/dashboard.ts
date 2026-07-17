@@ -35,9 +35,9 @@ export class DashboardComponent {
   editingItem  = signal<MenuItem | null>(null);
   newItem      = signal<Partial<MenuItem>>({ name: '', price: 0, category: '', description: '', image: '' });
 
-  // ── SALES COMPUTED ──
-  itemSales = computed(() => {
-    const orders = this.cartService.completedOrders();
+    itemSales = computed(() => {
+    const cancelledIds = this.cancelledOrderIds();
+    const orders = this.cartService.completedOrders().filter(o => !cancelledIds.has(o._id));
     const map    = new Map<string, { name: string; qty: number; total: number; image: string }>();
     orders.forEach(order => {
       order.items.forEach(entry => {
@@ -59,7 +59,8 @@ export class DashboardComponent {
   });
 
   transactionBreakdown = computed(() => {
-    const orders = this.cartService.completedOrders();
+    const cancelledIds = this.cancelledOrderIds();
+    const orders = this.cartService.completedOrders().filter(o => !cancelledIds.has(o._id));
     return {
       dineIn:  orders.filter(o => o.transactionMode === 'Dine In').length,
       takeOut: orders.filter(o => o.transactionMode === 'Take Out').length,
@@ -67,28 +68,49 @@ export class DashboardComponent {
     };
   });
 
+  todaySalesNet = computed(() => {
+    const cancelledIds = this.cancelledOrderIds();
+    return this.cartService.completedOrders()
+      .filter(o => !cancelledIds.has(o._id))
+      .reduce((sum, o) => sum + o.total, 0);
+  });
+
+  todayOrderCountNet = computed(() => {
+    const cancelledIds = this.cancelledOrderIds();
+    return this.cartService.completedOrders()
+      .filter(o => !cancelledIds.has(o._id))
+      .length;
+  });
+
   paymentBreakdown = computed(() => {
-    const orders = this.cartService.completedOrders();
+    const cancelledIds = this.cancelledOrderIds();
+    const orders = this.cartService.completedOrders().filter(o => !cancelledIds.has(o._id));
     return {
       cash:   orders.filter(o => o.paymentMode === 'Cash').length,
-      online: orders.filter(o => o.paymentMode === 'Online Payment').length,
-      grab:   orders.filter(o => o.paymentMode === 'Grab').length
+      gcashmaya: orders.filter(o => o.paymentMode === 'Gcash/Maya').length,
     };
   });
 
-  // ── ORDERS LIST (client-side "done" tracking — not persisted to backend) ──
+ // ── ORDERS LIST (client-side "done"/"cancelled" tracking — not persisted to backend) ──
   doneOrderIds = signal<Set<string>>(new Set());
+  cancelledOrderIds = signal<Set<string>>(new Set());
 
   private allOrdersIndexed = computed(() =>
     this.cartService.completedOrders().map((order, i) => ({ order, index: i + 1 }))
   );
 
   pendingOrders = computed(() =>
-    this.allOrdersIndexed().filter(entry => !this.doneOrderIds().has(entry.order._id))
+    this.allOrdersIndexed().filter(entry =>
+      !this.doneOrderIds().has(entry.order._id) && !this.cancelledOrderIds().has(entry.order._id)
+    )
   );
 
   doneOrders = computed(() =>
     this.allOrdersIndexed().filter(entry => this.doneOrderIds().has(entry.order._id))
+  );
+
+  cancelledOrders = computed(() =>
+    this.allOrdersIndexed().filter(entry => this.cancelledOrderIds().has(entry.order._id))
   );
 
   markOrderDone(orderId: string): void {
@@ -101,6 +123,18 @@ export class DashboardComponent {
     const updated = new Set(this.doneOrderIds());
     updated.delete(orderId);
     this.doneOrderIds.set(updated);
+  }
+
+  markOrderCancelled(orderId: string): void {
+    const updated = new Set(this.cancelledOrderIds());
+    updated.add(orderId);
+    this.cancelledOrderIds.set(updated);
+  }
+
+  undoOrderCancelled(orderId: string): void {
+    const updated = new Set(this.cancelledOrderIds());
+    updated.delete(orderId);
+    this.cancelledOrderIds.set(updated);
   }
 
   // ── INIT ──
@@ -118,12 +152,16 @@ export class DashboardComponent {
   }
 
   selectPayment(mode: string): void {
-    this.selectedPayment.set(mode);
-    this.cartService.transactionMode.set(this.selectedTransaction());
-    this.cartService.paymentMode.set(mode);
-    this.cartService.placeOrder();
-    this.orderStep.set(3);
+  if (!this.currentStaff()) {
+    this.router.navigate(['/']);
+    return;
   }
+  this.selectedPayment.set(mode);
+  this.cartService.transactionMode.set(this.selectedTransaction());
+  this.cartService.paymentMode.set(mode);
+  this.cartService.placeOrder();
+  this.orderStep.set(3);
+}
 
   newOrder(): void {
     this.selectedTransaction.set('');
