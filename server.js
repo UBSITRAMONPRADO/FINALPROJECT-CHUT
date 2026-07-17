@@ -27,10 +27,11 @@ const MenuItem = mongoose.model('MenuItem', MenuItemSchema);
 const StaffSchema = new mongoose.Schema({
   staffCode: { type: String, required: true, unique: true },
   name:      { type: String, required: true },
+  branch:    { type: String, enum: ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'], default: 'Harrison Bazaar' },
+  password:  { type: String, required: true },
   contact:   { type: String, default: '' },
   status:    { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
-  dateAdded: { type: String, default: '' },
-  password:  { type: String, required: true }
+  dateAdded: { type: String, default: () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }) }
 });
 const Staff = mongoose.model('Staff', StaffSchema);
 
@@ -53,26 +54,33 @@ const OrderSchema = new mongoose.Schema({
   total:           { type: Number, required: true },
   transactionMode: { type: String, default: '' },
   paymentMode:     { type: String, default: '' },
-  timestamp:       { type: Date, default: Date.now }
+  timestamp:       { type: Date, default: Date.now },
+
+  // ── Order status — cancelled orders are kept in DB for records but
+  // excluded from all sales totals (dailysales, history, live views) ──
+  status:          { type: String, enum: ['completed', 'cancelled'], default: 'completed' },
+
+  // ── Branch / employee attribution ──
+  branch:          { type: String, enum: ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'], default: 'Harrison Bazaar' },
+  staffName:       { type: String, default: 'Unknown' },
+  staffId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', default: null },
+
+  // ── Per-branch sequential order numbering (e.g. #HB001) ──
+  branchOrderNumber: { type: Number },
+  displayId:         { type: String }
 });
 const Order = mongoose.model('Order', OrderSchema);
 
 const KioskSettingsSchema = new mongoose.Schema({
   kioskName:        { type: String, default: 'Chut Chut' },
   transactionModes: { type: [String], default: ['Dine In', 'Take Out', 'Grab'] },
-  paymentModes:     { type: [String], default: ['Cash', 'Online Payment', 'Grab'] },
-  managerPassword:  { type: String, default: 'admin2024' }
+  paymentModes:     { type: [String], default: ['Cash', 'Gcash/maya'] },
+  managerPassword:  { type: String, default: 'manager@2026' }
 });
 const KioskSettings = mongoose.model('KioskSettings', KioskSettingsSchema);
 
-// ══════════════════════════════════════════
-//  DAILY SALES — persisted per-day summary
-//  Written to the DB (not just computed live) so the
-//  `dailysales` collection actually has data, and so a
-//  day's totals survive even after its raw orders are
-//  wiped by a reset.
-// ══════════════════════════════════════════
 
+//  DAILY SALES — persisted per-day summary
 const DailySalesSchema = new mongoose.Schema({
   date:         { type: String, required: true, unique: true }, // "YYYY-MM-DD" (Asia/Manila)
   totalSales:   { type: Number, default: 0 },
@@ -98,9 +106,34 @@ const DailySalesSchema = new mongoose.Schema({
 });
 const DailySales = mongoose.model('DailySales', DailySalesSchema);
 
+// ── Per-branch order number counter (atomic increments) ──
+const CounterSchema = new mongoose.Schema({
+  key: { type: String, required: true, unique: true }, // branch name
+  seq: { type: Number, default: 0 }
+});
+const Counter = mongoose.model('Counter', CounterSchema);
+
+const branchCodes = {
+  'Harrison Bazaar': 'HB',
+  'Pines Arcade':    'PA',
+  'Porta Vaga':      'PV'
+};
+
+async function getNextBranchOrderNumber(branch) {
+  const counter = await Counter.findOneAndUpdate(
+    { key: branch },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true }
+  );
+  return counter.seq;
+}
+
+function formatDisplayId(branch, seq) {
+  const code = branchCodes[branch] || 'XX';
+  return `#${code}${String(seq).padStart(3, '0')}`;
+}
+
 // Returns the UTC start/end instants that correspond to midnight-to-midnight
-// in Asia/Manila for whatever date `refDate` falls on. Manila is UTC+8 with
-// no DST, so this is a fixed offset — safe to hardcode.
 function getManilaDayBounds(refDate = new Date()) {
   const dateStr = refDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); // "YYYY-MM-DD"
   const start = new Date(`${dateStr}T00:00:00+08:00`);
@@ -108,16 +141,12 @@ function getManilaDayBounds(refDate = new Date()) {
   return { dateStr, start, end };
 }
 
-// Recomputes one day's summary straight from the Orders collection
-// and upserts it into `dailysales`. Called after every new order and
-// once more (to finalize) right before a daily reset.
-// NOTE: this fully recomputes from whatever orders currently exist for
-// that day — if you reset more than once within the same calendar day,
-// the earlier session's totals get overwritten by the later recompute
-// rather than accumulated. Flag if that matters for your workflow.
+// Recomputes one day's summary straight from the Orders collection.
+// Cancelled orders are excluded from every total below.
 async function upsertDailySales(refDate = new Date()) {
   const { dateStr, start, end } = getManilaDayBounds(refDate);
-  const orders = await Order.find({ timestamp: { $gte: start, $lte: end } });
+  const allOrders = await Order.find({ timestamp: { $gte: start, $lte: end } });
+  const orders = allOrders.filter(o => o.status !== 'cancelled'); // NEW — exclude cancelled
 
   const summary = {
     date:         dateStr,
@@ -168,6 +197,9 @@ async function upsertDailySales(refDate = new Date()) {
   );
 }
 
+// Groups raw orders by Manila date. Cancelled orders are still pushed into
+// day.orders (so the frontend can list/display them), but are excluded from
+// every sum: totalSales, totalOrders, transactions, payments, topItems.
 function groupOrdersByDate(orders) {
   const map = new Map();
 
@@ -188,9 +220,12 @@ function groupOrdersByDate(orders) {
     }
 
     const day = map.get(date);
+    day.orders.push(order); // always keep the order visible in the day's list
+
+    if (order.status === 'cancelled') return; // NEW — skip all sums for cancelled orders
+
     day.totalSales  += order.total;
     day.totalOrders += 1;
-    day.orders.push(order);
 
     if (order.transactionMode === 'Dine In')  day.transactions.dineIn++;
     if (order.transactionMode === 'Take Out') day.transactions.takeOut++;
@@ -230,12 +265,6 @@ function groupOrdersByDate(orders) {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
-// Merges live-computed history (from whatever is still in `orders`) with
-// any persisted `dailysales` days that have NO matching live orders left —
-// i.e. days that got wiped by a reset. Without this, a reset day would
-// vanish from Sales History entirely even though its summary is safely
-// archived in `dailysales`.
-// `orders` here should already be Order.find().sort({ timestamp: 1 }).
 async function getMergedDailyHistory(orders) {
   const liveHistory = groupOrdersByDate(orders);
   const liveDates   = new Set(liveHistory.map(d => d.date));
@@ -329,11 +358,15 @@ app.delete('/api/staff/:id', async (req, res) => {
 //  ORDER ENDPOINTS
 // ══════════════════════════════════════════
 
-// GET today's orders — used by both dashboard and manager live view
+// GET today's orders — used by both dashboard and manager live view.
+// Optional ?branch= filter, used by the Employee Dashboard so staff
+// only ever see their own assigned branch's orders.
 app.get('/api/orders/today', async (req, res) => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const orders = await Order.find({ timestamp: { $gte: startOfDay } }).sort({ timestamp: -1 });
+  const filter = { timestamp: { $gte: startOfDay } };
+  if (req.query.branch) filter.branch = req.query.branch;
+  const orders = await Order.find(filter).sort({ timestamp: -1 });
   res.send(orders);
 });
 
@@ -345,11 +378,19 @@ app.get('/api/orders/history', async (req, res) => {
   res.send(await getMergedDailyHistory(orders));
 });
 
-// POST a new order
+// POST a new order — assigns a per-branch sequential display ID
+// (e.g. #HB001, #PA001, #PV001) in addition to the Mongo _id.
 app.post('/api/orders', async (req, res) => {
-  const order = new Order(req.body);
+  const branch = req.body.branch || 'Harrison Bazaar';
+  const seq = await getNextBranchOrderNumber(branch);
+
+  const order = new Order({
+    ...req.body,
+    branchOrderNumber: seq,
+    displayId: formatDisplayId(branch, seq)
+  });
   await order.save();
-  console.log('New order — ₱' + order.total);
+  console.log(`New order ${order.displayId} — ₱${order.total}`);
 
   // Keep today's row in `dailysales` in sync with the new order
   try {
@@ -359,6 +400,46 @@ app.post('/api/orders', async (req, res) => {
   }
 
   res.status(201).send(order);
+});
+
+// PATCH — cancel an order (soft-cancel, order stays in DB for records
+// but is excluded from every sales total from this point on)
+app.patch('/api/orders/:id/cancel', async (req, res) => {
+  const order = await Order.findByIdAndUpdate(
+    req.params.id,
+    { status: 'cancelled' },
+    { new: true }
+  );
+  if (!order) return res.status(404).send({ error: 'Order not found' });
+
+  // Recompute today's dailysales row so totals reflect the cancellation
+  try {
+    await upsertDailySales(order.timestamp);
+  } catch (err) {
+    console.error('Failed to upsert dailysales after cancel:', err);
+  }
+
+  console.log(`Order ${order.displayId || order._id} cancelled`);
+  res.send(order);
+});
+
+// PATCH — restore a cancelled order back to completed
+app.patch('/api/orders/:id/uncancel', async (req, res) => {
+  const order = await Order.findByIdAndUpdate(
+    req.params.id,
+    { status: 'completed' },
+    { new: true }
+  );
+  if (!order) return res.status(404).send({ error: 'Order not found' });
+
+  try {
+    await upsertDailySales(order.timestamp);
+  } catch (err) {
+    console.error('Failed to upsert dailysales after uncancel:', err);
+  }
+
+  console.log(`Order ${order.displayId || order._id} restored`);
+  res.send(order);
 });
 
 // DELETE reset — clears TODAY's orders only.
@@ -377,6 +458,30 @@ app.delete('/api/orders/reset', async (req, res) => {
   const result = await Order.deleteMany({ timestamp: { $gte: startOfDay } });
   console.log(`Reset: cleared ${result.deletedCount} orders from today`);
   res.send({ message: `Cleared ${result.deletedCount} orders from today` });
+});
+
+// ══════════════════════════════════════════
+//  ONE-TIME MIGRATION — backfill displayId for existing orders
+//  that were created before branch order numbering existed.
+//  Run once (e.g. via curl/Postman: POST /api/migrate/branch-order-numbers),
+//  confirm the response, then remove this route.
+// ══════════════════════════════════════════
+app.post('/api/migrate/branch-order-numbers', async (req, res) => {
+  const branches = Object.keys(branchCodes);
+  let updatedCount = 0;
+
+  for (const branch of branches) {
+    const orders = await Order.find({ branch, displayId: { $exists: false } }).sort({ timestamp: 1 });
+    for (const order of orders) {
+      const seq = await getNextBranchOrderNumber(branch);
+      order.branchOrderNumber = seq;
+      order.displayId = formatDisplayId(branch, seq);
+      await order.save();
+      updatedCount++;
+    }
+  }
+
+  res.send({ message: `Backfilled ${updatedCount} orders with branch order numbers.` });
 });
 
 // ══════════════════════════════════════════
@@ -447,7 +552,9 @@ app.get('/api/backup', async (req, res) => {
       orderRows.push({
         'Date':             date,
         'Time':             time,
-        'Order ID':         order._id.toString(),
+        'Order ID':         order.displayId || order._id.toString(),
+        'Branch':           order.branch,
+        'Employee':         order.staffName,
         'Item Name':        entry.item.name,
         'Category':         entry.item.category,
         'Unit Price':       entry.item.price,
@@ -455,7 +562,8 @@ app.get('/api/backup', async (req, res) => {
         'Subtotal':         entry.item.price * entry.quantity,
         'Order Total':      order.total,
         'Transaction Mode': order.transactionMode,
-        'Payment Mode':     order.paymentMode
+        'Payment Mode':     order.paymentMode,
+        'Status':           order.status || 'completed'
       });
     });
   });
@@ -470,7 +578,6 @@ app.get('/api/backup', async (req, res) => {
     'Grab':           day.transactions.grab,
     'Cash':           day.payments.cash,
     'Online/GCash':   day.payments.online,
-    'Grab Pay':       day.payments.grab
   }));
 
   // Sheet 3 — Menu Items
@@ -486,9 +593,7 @@ app.get('/api/backup', async (req, res) => {
   const staffRows = staff.map(s => ({
     'Staff Code': s.staffCode,
     'Name':       s.name,
-    'Contact':    s.contact,
-    'Status':     s.status,
-    'Date Added': s.dateAdded
+    'branch':     s.branch,
   }));
 
   res.send({ orderRows, dailySummaryRows, menuRows, staffRows });
@@ -558,7 +663,44 @@ app.post('/api/seed', async (req, res) => {
   });
 });
 
+// ══════════════════════════════════════════
+//  SYSTEM RESET — wipes all practice data before the business goes live.
+//  Clears: Orders, DailySales (archived history), Counters (order numbering),
+//  MenuItem, Staff. KioskSettings (manager password/toggles) is left intact.
+// ══════════════════════════════════════════
+app.delete('/api/system/clear-all', async (req, res) => {
+  try {
+    const [orders, dailySales, counters, menu, staff] = await Promise.all([
+      Order.deleteMany({}),
+      DailySales.deleteMany({}),
+      Counter.deleteMany({}),
+      MenuItem.deleteMany({}),
+      Staff.deleteMany({})
+    ]);
+
+    console.log(
+      `System cleared — Orders: ${orders.deletedCount}, DailySales: ${dailySales.deletedCount}, ` +
+      `Counters: ${counters.deletedCount}, Menu: ${menu.deletedCount}, Staff: ${staff.deletedCount}`
+    );
+
+    res.send({
+      success: true,
+      message: 'All system data cleared.',
+      deleted: {
+        orders: orders.deletedCount,
+        dailySales: dailySales.deletedCount,
+        counters: counters.deletedCount,
+        menuItems: menu.deletedCount,
+        staff: staff.deletedCount
+      }
+    });
+  } catch (err) {
+    console.error('Clear all data failed:', err);
+    res.status(500).send({ success: false, error: err.message });
+  }
+});
+
 // ── START SERVER ──
-app.listen(process.env.PORT || 3000, () => {
+app.listen(3000, () => {
   console.log('Chut Chut server is running on port 3000');
 });
