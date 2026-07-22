@@ -13,7 +13,7 @@
     private router = inject(Router);
     private http = inject(HttpClient);
     private cartService = inject(CartServices);
-    private api = 'https://finalproject-chut-2.onrender.com';
+    private api = 'https://finalproject-chut-2.onrender.com/api';
 
     staffCode = signal('');
     password = signal('');
