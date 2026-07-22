@@ -5,10 +5,40 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ── IMAGE UPLOADS ──
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+
+// Serves uploaded images statically at http://localhost:3000/uploads/<filename>
+app.use('/uploads', express.static(uploadsDir));
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '-');
+    cb(null, `${base}-${Date.now()}${ext}`); // unique name, avoids overwriting
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB cap
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp/;
+    const extOk  = allowed.test(path.extname(file.originalname).toLowerCase());
+    const mimeOk = allowed.test(file.mimetype);
+    if (extOk && mimeOk) return cb(null, true);
+    cb(new Error('Only image files (jpg, png, gif, webp) are allowed'));
+  }
+});
 
 // ── CONNECT TO MONGODB ──
 mongoose.connect(process.env.MONGODB_URI)
@@ -20,7 +50,25 @@ const MenuItemSchema = new mongoose.Schema({
   price:       { type: Number, required: true },
   category:    { type: String, required: true },
   description: { type: String, default: '' },
-  image:       { type: String, default: '' }
+  image:       { type: String, default: '' },
+
+  // Variant groups for this item — e.g. Sauce, Spice Level, Extras.
+  // Empty array = no picker shown, item adds to cart instantly.
+  // 'single' groups are radio-style (exactly one choice, can be required);
+  // 'multi' groups are checkbox-style (zero or more choices) and are how
+  // priced add-ons like "Extra Fries +₱35" work.
+  variantGroups: {
+    type: [{
+      name:     { type: String, required: true },       // "Sauce", "Spice Level", "Extras"
+      type:     { type: String, enum: ['single', 'multi'], default: 'single' },
+      required: { type: Boolean, default: false },
+      options: [{
+        label:      { type: String, required: true },
+        priceDelta: { type: Number, default: 0 }         // added to unit price when selected
+      }]
+    }],
+    default: []
+  }
 });
 const MenuItem = mongoose.model('MenuItem', MenuItemSchema);
 
@@ -48,7 +96,17 @@ const OrderSchema = new mongoose.Schema({
         description: String,
         image:       String
       },
-      quantity: Number
+      quantity: Number,
+
+      // The chosen option(s) across all of this item's variant groups —
+      // e.g. [{groupName:'Sauce',label:'Honey Butter',priceDelta:0},
+      //       {groupName:'Extras',label:'Extra Fries',priceDelta:35}].
+      // Empty array for items with no variant groups.
+      selectedOptions: [{
+        groupName:  String,
+        label:      String,
+        priceDelta: Number
+      }]
     }
   ],
   total:           { type: Number, required: true },
@@ -485,6 +543,103 @@ app.post('/api/migrate/branch-order-numbers', async (req, res) => {
 });
 
 // ══════════════════════════════════════════
+//  ONE-TIME MIGRATION — applies full variant groups (Sauce/Flavor, Spice
+//  Level, Extras) to every menu category, and consolidates the 3 separate
+//  Giant Twirl items into one item with a Flavor group.
+//  This supersedes the old /api/migrate/add-variants (single flavor list)
+//  route — that field is no longer used by the schema.
+//  Run once (POST /api/migrate/add-variant-groups), confirm the response,
+//  then remove this route. Defaults below are a starting point — adjust
+//  any item's groups afterward from the Manager Panel Menu tab.
+// ══════════════════════════════════════════
+app.post('/api/migrate/add-variant-groups', async (req, res) => {
+  const opt = (label, priceDelta = 0) => ({ label, priceDelta });
+
+  // Chicken items — Wings & Rice/Fries/Gravy/Drinks, Combos
+  const chickenGroups = [
+    {
+      name: 'Sauce', type: 'single', required: true,
+      options: [opt('Honey Butter'), opt('Lemon Glaze'), opt('Yamyeong'), opt('Cheese')]
+    },
+    {
+      name: 'Spice Level', type: 'single', required: true,
+      options: [opt('Mild'), opt('Medium'), opt('Hot')]
+    },
+    {
+      name: 'Extras', type: 'multi', required: false,
+      options: [opt('Extra Rice', 25), opt('Extra Fries', 35), opt('Extra Sauce', 15)]
+    }
+  ];
+  const chickenCategories = ['Wings & Rice', 'Wings & Fries', 'Wings & Gravy', 'Wings & Drinks', 'Combos'];
+
+  // Fries
+  const friesGroups = [
+    {
+      name: 'Flavor', type: 'single', required: true,
+      options: [opt('Cheese'), opt('Sour Cream'), opt('BBQ')]
+    },
+    {
+      name: 'Extras', type: 'multi', required: false,
+      options: [opt('Extra Dip', 15)]
+    }
+  ];
+
+  // Corndog
+  const corndogGroups = [
+    {
+      name: 'Extras', type: 'multi', required: false,
+      options: [opt('Extra Cheese Dip', 15)]
+    }
+  ];
+
+  // Chillers (sundaes/floats/macchiatos are already flavor-specific by
+  // name, so they just get a lightweight Extras group; Giant Twirl gets
+  // its own dedicated Flavor group, set separately below)
+  const chillersGroups = [
+    {
+      name: 'Extras', type: 'multi', required: false,
+      options: [opt('Extra Toppings', 10)]
+    }
+  ];
+
+  const chickenResult  = await MenuItem.updateMany({ category: { $in: chickenCategories } }, { $set: { variantGroups: chickenGroups } });
+  const friesResult    = await MenuItem.updateMany({ category: 'Fries' },    { $set: { variantGroups: friesGroups } });
+  const corndogResult  = await MenuItem.updateMany({ category: 'Corndog' },  { $set: { variantGroups: corndogGroups } });
+  const chillersResult = await MenuItem.updateMany(
+    { category: 'Chillers', name: { $not: { $regex: '^Giant Twirl' } } },
+    { $set: { variantGroups: chillersGroups } }
+  );
+
+  // Consolidate the 3 Giant Twirl items into one item with a Flavor group
+  const giantTwirls = await MenuItem.find({ name: { $regex: '^Giant Twirl' } }).sort({ name: 1 });
+  let giantTwirlResult = 'No Giant Twirl items found';
+  if (giantTwirls.length > 0) {
+    const keeper = giantTwirls[0];
+    keeper.name = 'Giant Twirl';
+    keeper.description = 'Soft serve cone — Chocolate, Vanilla, or Mix';
+    keeper.variantGroups = [
+      { name: 'Flavor', type: 'single', required: true, options: [opt('Chocolate'), opt('Vanilla'), opt('Mix')] }
+    ];
+    await keeper.save();
+
+    const toRemove = giantTwirls.slice(1).map(d => d._id);
+    if (toRemove.length > 0) {
+      await MenuItem.deleteMany({ _id: { $in: toRemove } });
+    }
+    giantTwirlResult = `Consolidated ${giantTwirls.length} Giant Twirl item(s) into one`;
+  }
+
+  res.send({
+    message: 'Variant group migration complete',
+    chickenItemsUpdated:  chickenResult.modifiedCount,
+    friesItemsUpdated:    friesResult.modifiedCount,
+    corndogItemsUpdated:  corndogResult.modifiedCount,
+    chillersItemsUpdated: chillersResult.modifiedCount,
+    giantTwirl: giantTwirlResult
+  });
+});
+
+// ══════════════════════════════════════════
 //  DAILY SALES ENDPOINTS
 // ══════════════════════════════════════════
 
@@ -556,6 +711,7 @@ app.get('/api/backup', async (req, res) => {
         'Branch':           order.branch,
         'Employee':         order.staffName,
         'Item Name':        entry.item.name,
+        'Options':          (entry.selectedOptions || []).map(o => `${o.groupName}: ${o.label}${o.priceDelta ? ' (+₱' + o.priceDelta + ')' : ''}`).join(', '),
         'Category':         entry.item.category,
         'Unit Price':       entry.item.price,
         'Quantity':         entry.quantity,
@@ -601,50 +757,91 @@ app.get('/api/backup', async (req, res) => {
 });
 
 
-const menuSeedData = [
-  { name: 'Wings & Rice 2pcs', price: 90, category: 'Wings & Rice', description: '2 pcs chicken wings with steamed rice', image: 'wings-rice.jpg' },
-  { name: 'Wings & Rice 3pcs', price: 110, category: 'Wings & Rice', description: '3 pcs chicken wings with steamed rice', image: 'wings-rice.jpg' },
-  { name: 'Wings & Fries 2pcs', price: 100, category: 'Wings & Fries', description: '2 pcs chicken wings with fries', image: 'wingsfries.png' },
-  { name: 'Wings & Fries 3pcs', price: 120, category: 'Wings & Fries', description: '3 pcs chicken wings with fries', image: 'wingsfries.png' },
-  { name: 'Wings & Fries 4pcs', price: 125, category: 'Wings & Fries', description: '4 pcs chicken wings with fries', image: 'wingsfries.png' },
-  { name: 'Wings & Fries 5pcs', price: 140, category: 'Wings & Fries', description: '5 pcs chicken wings with fries', image: 'wingsfries.png' },
-  { name: 'Wings & Rice w/ Gravy 2pcs', price: 80, category: 'Wings & Gravy', description: '2 pcs chicken wings with rice and gravy', image: 'wings-gravy.png' },
-  { name: 'Wings & Rice w/ Gravy 3pcs', price: 90, category: 'Wings & Gravy', description: '3 pcs chicken wings with rice and gravy', image: 'wings-gravy2.png' },
-  { name: 'Wings & Rice w/ Drinks', price: 175, category: 'Wings & Drinks', description: 'Chicken wings with plain rice and drinks', image: 'wings-rice-drinks.png' },
-  { name: 'Combo 1', price: 180, category: 'Combos', description: '6 pcs chicken only (2 flavor of choice)', image: 'combo1.png' },
-  { name: 'Combo 2', price: 240, category: 'Combos', description: '8 pcs chicken only (flavor of choice)', image: 'combo2.png' },
-  { name: 'Combo 3', price: 154, category: 'Combos', description: '2 pcs chicken with cheese hotdog', image: 'combo2.png' },
-  { name: 'Fries Small', price: 50, category: 'Fries', description: 'Small fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg' },
-  { name: 'Fries Medium', price: 60, category: 'Fries', description: 'Medium fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg' },
-  { name: 'Fries Large', price: 80, category: 'Fries', description: 'Large fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg' },
-  { name: 'Mozzarella Corndog', price: 100, category: 'Corndog', description: 'Chut Chut style mozzarella corndog', image: 'corndog.jpg' },
-  { name: 'Cheese Hotdog Corndog', price: 85, category: 'Corndog', description: 'Chut Chut style cheese hotdog corndog', image: 'corndog.jpg' },
-  { name: 'Cone Twirl Vanilla', price: 25, category: 'Chillers', description: 'Soft serve vanilla cone twirl', image: 'vanilla.jpg' },
-  { name: 'Cone Twirl Chocolate', price: 25, category: 'Chillers', description: 'Soft serve chocolate cone twirl', image: 'chocolate.jpg' },
-  { name: 'Cone Twirl Mix', price: 25, category: 'Chillers', description: 'Soft serve vanilla & chocolate mix', image: 'mix.jpg' },
-  { name: 'Strawberry Sundae', price: 40, category: 'Chillers', description: 'Creamy strawberry sundae twist', image: 'sundaetwist.png' },
-  { name: 'Blueberry Sundae', price: 40, category: 'Chillers', description: 'Creamy blueberry sundae twist', image: 'sundaetwist.png' },
-  { name: 'Caramel Sundae', price: 40, category: 'Chillers', description: 'Rich caramel sundae twist', image: 'sundaetwist.png' },
-  { name: 'Crimson Sundae', price: 40, category: 'Chillers', description: 'Crimson flavor sundae twist', image: 'sundaetwist.png' },
-  { name: 'Lemon Sundae', price: 40, category: 'Chillers', description: 'Refreshing lemon sundae twist', image: 'lemonsundae.png' },
-  { name: 'Giant Twirl Chocolate', price: 35, category: 'Chillers', description: 'Large chocolate soft serve cone', image: 'giantwirl.png' },
-  { name: 'Giant Twirl Vanilla', price: 35, category: 'Chillers', description: 'Large vanilla soft serve cone', image: 'giantwirl.png' },
-  { name: 'Giant Twirl Mix', price: 35, category: 'Chillers', description: 'Large vanilla & chocolate mix cone', image: 'giantwirl.png' },
-  { name: 'Soda Float 7UP', price: 50, category: 'Chillers', description: '7UP soda float with soft serve', image: '7up.jpg' },
-  { name: 'Soda Float Coke', price: 50, category: 'Chillers', description: 'Coke soda float with soft serve', image: 'coke.jpg' },
-  { name: 'Soda Float Royal', price: 50, category: 'Chillers', description: 'Royal soda float with soft serve', image: 'royal.jpg' },
-  { name: 'Chocolate Macchiato', price: 55, category: 'Chillers', description: 'Chut Chut premium chocolate macchiato', image: 'icedcoffee.png' },
-  { name: 'Caramel Macchiato', price: 55, category: 'Chillers', description: 'Iced caramel macchiato', image: 'icedcoffee.png' },
-  { name: 'French Vanilla', price: 55, category: 'Chillers', description: 'Chilled iced french vanilla', image: 'icedcoffee.png' },
-  { name: "Sundae's Best Choco Crunkies", price: 50, category: 'Chillers', description: 'Sundae overload with toppings', image: 'choco.png' },
-  { name: "Sundae's Best Caramel Nut Crunch", price: 50, category: 'Chillers', description: 'Rocky road sundae with toppings', image: 'caramel.png' },
-  { name: "Sundae's Best Strawberry Crunch", price: 50, category: 'Chillers', description: 'Graham pampig sundae with toppings', image: 'strawberry.png' },
+const opt = (label, priceDelta = 0) => ({ label, priceDelta });
+
+const chickenVariantGroups = [
+  { name: 'Sauce', type: 'single', required: true, options: [opt('Honey Butter'), opt('Lemon Glaze'), opt('Yamyeong'), opt('Cheese')] },
+  { name: 'Spice Level', type: 'single', required: true, options: [opt('Mild'), opt('Medium'), opt('Hot')] },
+  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Rice', 25), opt('Extra Fries', 35), opt('Extra Sauce', 15)] }
 ];
 
-const staffSeedData = [
-  { staffCode: 'EMP001', name: 'Juan Dela Cruz', contact: '09123456789', status: 'Active', dateAdded: '2026-06-01', password: 'juan2024' },
-  { staffCode: 'EMP002', name: 'Maria Santos', contact: '09987654321', status: 'Active', dateAdded: '2026-06-01', password: 'maria2024' },
+const friesVariantGroups = [
+  { name: 'Flavor', type: 'single', required: true, options: [opt('Cheese'), opt('Sour Cream'), opt('BBQ')] },
+  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Dip', 15)] }
 ];
+
+const corndogVariantGroups = [
+  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Cheese Dip', 15)] }
+];
+
+const chillersVariantGroups = [
+  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Toppings', 10)] }
+];
+
+const menuSeedData = [
+  { name: 'Wings & Rice 2pcs', price: 90, category: 'Wings & Rice', description: '2 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice 3pcs', price: 110, category: 'Wings & Rice', description: '3 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 2pcs', price: 100, category: 'Wings & Fries', description: '2 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 3pcs', price: 120, category: 'Wings & Fries', description: '3 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 4pcs', price: 125, category: 'Wings & Fries', description: '4 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 5pcs', price: 140, category: 'Wings & Fries', description: '5 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice w/ Gravy 2pcs', price: 80, category: 'Wings & Gravy', description: '2 pcs chicken wings with rice and gravy', image: 'wings-gravy.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice w/ Gravy 3pcs', price: 90, category: 'Wings & Gravy', description: '3 pcs chicken wings with rice and gravy', image: 'wings-gravy2.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice w/ Drinks', price: 175, category: 'Wings & Drinks', description: 'Chicken wings with plain rice and drinks', image: 'wings-rice-drinks.png', variantGroups: chickenVariantGroups },
+  { name: 'Combo 1', price: 180, category: 'Combos', description: '6 pcs chicken only (2 flavor of choice)', image: 'combo1.png', variantGroups: chickenVariantGroups },
+  { name: 'Combo 2', price: 240, category: 'Combos', description: '8 pcs chicken only (flavor of choice)', image: 'combo2.png', variantGroups: chickenVariantGroups },
+  { name: 'Combo 3', price: 154, category: 'Combos', description: '2 pcs chicken with cheese hotdog', image: 'combo2.png', variantGroups: chickenVariantGroups },
+  { name: 'Fries Small', price: 50, category: 'Fries', description: 'Small fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
+  { name: 'Fries Medium', price: 60, category: 'Fries', description: 'Medium fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
+  { name: 'Fries Large', price: 80, category: 'Fries', description: 'Large fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
+  { name: 'Mozzarella Corndog', price: 100, category: 'Corndog', description: 'Chut Chut style mozzarella corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
+  { name: 'Cheese Hotdog Corndog', price: 85, category: 'Corndog', description: 'Chut Chut style cheese hotdog corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
+  { name: 'Cone Twirl Vanilla', price: 25, category: 'Chillers', description: 'Soft serve vanilla cone twirl', image: 'vanilla.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Cone Twirl Chocolate', price: 25, category: 'Chillers', description: 'Soft serve chocolate cone twirl', image: 'chocolate.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Cone Twirl Mix', price: 25, category: 'Chillers', description: 'Soft serve vanilla & chocolate mix', image: 'mix.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Strawberry Sundae', price: 40, category: 'Chillers', description: 'Creamy strawberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Blueberry Sundae', price: 40, category: 'Chillers', description: 'Creamy blueberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Caramel Sundae', price: 40, category: 'Chillers', description: 'Rich caramel sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Crimson Sundae', price: 40, category: 'Chillers', description: 'Crimson flavor sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Lemon Sundae', price: 40, category: 'Chillers', description: 'Refreshing lemon sundae twist', image: 'lemonsundae.png', variantGroups: chillersVariantGroups },
+  { name: 'Giant Twirl', price: 35, category: 'Chillers', description: 'Soft serve cone — Chocolate, Vanilla, or Mix', image: 'giantwirl.png', variantGroups: [{ name: 'Flavor', type: 'single', required: true, options: [opt('Chocolate'), opt('Vanilla'), opt('Mix')] }] },
+  { name: 'Soda Float 7UP', price: 50, category: 'Chillers', description: '7UP soda float with soft serve', image: '7up.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Soda Float Coke', price: 50, category: 'Chillers', description: 'Coke soda float with soft serve', image: 'coke.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Soda Float Royal', price: 50, category: 'Chillers', description: 'Royal soda float with soft serve', image: 'royal.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Chocolate Macchiato', price: 55, category: 'Chillers', description: 'Chut Chut premium chocolate macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
+  { name: 'Caramel Macchiato', price: 55, category: 'Chillers', description: 'Iced caramel macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
+  { name: 'French Vanilla', price: 55, category: 'Chillers', description: 'Chilled iced french vanilla', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Choco Crunkies", price: 50, category: 'Chillers', description: 'Sundae overload with toppings', image: 'choco.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Caramel Nut Crunch", price: 50, category: 'Chillers', description: 'Rocky road sundae with toppings', image: 'caramel.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Strawberry Crunch", price: 50, category: 'Chillers', description: 'Graham pampig sundae with toppings', image: 'strawberry.png', variantGroups: chillersVariantGroups },
+];
+app.post('/api/menu', async (req, res) => {
+  const item = new MenuItem(req.body);
+  await item.save();
+  res.status(201).send(item);
+});
+
+// ══════════════════════════════════════════
+//  IMAGE UPLOAD ENDPOINT
+// ══════════════════════════════════════════
+
+app.post('/api/upload', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).send({ error: 'No file uploaded' });
+  console.log('Image uploaded:', req.file.filename);
+  res.status(201).send({
+    filename: req.file.filename,
+    url: `/uploads/${req.file.filename}`
+  });
+});
+
+// Handles multer errors (bad file type, too large) with a clean JSON response
+// instead of Express's default HTML error page.
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err.message?.includes('image files')) {
+    return res.status(400).send({ error: err.message });
+  }
+  next(err);
+});
 
 app.post('/api/seed', async (req, res) => {
   const existingMenu  = await MenuItem.countDocuments();
@@ -661,43 +858,6 @@ app.post('/api/seed', async (req, res) => {
     message: `Seeded ${insertedMenu.length} menu items and ${insertedStaff.length} staff.`,
     managerPassword: settings.managerPassword
   });
-});
-
-// ══════════════════════════════════════════
-//  SYSTEM RESET — wipes all practice data before the business goes live.
-//  Clears: Orders, DailySales (archived history), Counters (order numbering),
-//  MenuItem, Staff. KioskSettings (manager password/toggles) is left intact.
-// ══════════════════════════════════════════
-app.delete('/api/system/clear-all', async (req, res) => {
-  try {
-    const [orders, dailySales, counters, menu, staff] = await Promise.all([
-      Order.deleteMany({}),
-      DailySales.deleteMany({}),
-      Counter.deleteMany({}),
-      MenuItem.deleteMany({}),
-      Staff.deleteMany({})
-    ]);
-
-    console.log(
-      `System cleared — Orders: ${orders.deletedCount}, DailySales: ${dailySales.deletedCount}, ` +
-      `Counters: ${counters.deletedCount}, Menu: ${menu.deletedCount}, Staff: ${staff.deletedCount}`
-    );
-
-    res.send({
-      success: true,
-      message: 'All system data cleared.',
-      deleted: {
-        orders: orders.deletedCount,
-        dailySales: dailySales.deletedCount,
-        counters: counters.deletedCount,
-        menuItems: menu.deletedCount,
-        staff: staff.deletedCount
-      }
-    });
-  } catch (err) {
-    console.error('Clear all data failed:', err);
-    res.status(500).send({ success: false, error: err.message });
-  }
 });
 
 // ── START SERVER ──
