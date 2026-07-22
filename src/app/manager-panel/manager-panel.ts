@@ -517,7 +517,7 @@ export class ManagerPanelComponent implements OnDestroy {
   updateNewItem(field: string, value: string | number): void {
     this.newItem.set({ ...this.newItem(), [field]: value });
   }
-  
+
   onImageFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -528,7 +528,7 @@ export class ManagerPanelComponent implements OnDestroy {
       next: (result) => {
         // Store the full URL so <img [src]> resolves correctly even though
         // the Angular app and the upload server run on different origins.
-        this.updateNewItem('image', `http://localhost:3000${result.url}`);
+        this.updateNewItem('image', `https://finalproject-chut-2.onrender.com${result.url}`);
         this.imageUploading.set(false);
       },
       error: (err) => {
