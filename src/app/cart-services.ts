@@ -109,7 +109,7 @@ export interface BackupPayload {
 export class CartServices {
 
   private http = inject(HttpClient);
-  private api = 'http://localhost:3000/api';
+  private api = 'https://finalproject-chut-2.onrender.com/api';
 
   // ── SETTINGS ──
   kioskSettings = signal<KioskSettings>({
