@@ -1028,3 +1028,273 @@
   .form-card, .settings-card { padding: 18px; }
   .breakdown-card, .chart-card { padding: 18px; }
 }
+
+/* ══════════════════════════════════════════
+   APPEND TO THE END OF YOUR EXISTING
+   manager-panel.css — do not replace the file,
+   these are new classes only, referenced by the
+   updated manager-panel.html.
+   ══════════════════════════════════════════ */
+
+/* ── Order actions row (Cancel button on live orders,
+   Undo on cancelled orders) — same pattern as the
+   Employee Dashboard's Done/Cancelled sections ── */
+.order-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.order-actions.between {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cancel-order-btn {
+  background: #C1121F;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cancel-order-btn:hover {
+  background: #96101a;
+}
+
+.undo-btn {
+  background: #fff;
+  color: #7A7268;
+  border: 1px solid #E3DCCC;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.undo-btn:hover {
+  background: #F7F4EE;
+}
+
+.order-card.cancelled {
+  background: #FBEAEA;
+  border: 1px solid #F0C6C6;
+}
+.cancelled-tag {
+  color: #C1121F;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+/* ── Count pill badge next to section headings
+   (e.g. "3 cancelled", "12 today") ── */
+.count-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  margin-left: 8px;
+  color: #fff;
+}
+.count-pill.red { background: #C1121F; }
+.count-pill.green { background: #2F8F4E; }
+
+/* ── Flavor shown inline next to an item on an order tag
+   (Dashboard, Sales History, Cancelled Orders) ── */
+.tag-variant {
+  color: #CC0000;
+  font-weight: 800;
+}
+
+/* ── Cancelled status pill in the Transactions table
+   (adds a red variant alongside your existing .status-pill) ── */
+.status-pill.cancelled {
+  background: #FBEAEA;
+  color: #C1121F;
+}
+
+/* ── Menu form — flavor input hint + live preview chips ── */
+.form-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 0.75rem;
+}
+
+.variant-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.variant-preview-chip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #FFF3D6;
+  color: #A66A00;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* ── Flavor count shown on a Menu Management card ── */
+.menu-card-variants {
+  font-size: 0.72rem;
+  color: #A66A00;
+  font-weight: 700;
+  margin-top: 4px;
+}
+/* ── VARIANT GROUPS EDITOR (Menu form) ── */
+
+.variant-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.form-hint {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #999;
+  margin-left: 6px;
+}
+
+.add-group-btn {
+  padding: 6px 16px;
+  background: #fff8e1;
+  color: #1a1a1a;
+  border: 1.5px solid #FFC200;
+  border-radius: 50px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.add-group-btn:hover { background: #FFC200; }
+
+.variant-group-card {
+  background: #f5f0e8;
+  border: 1.5px solid #f0ebe0;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.variant-group-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.required-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #555;
+  white-space: nowrap;
+}
+.required-toggle input { width: 15px; height: 15px; accent-color: #CC0000; }
+
+.variant-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 4px;
+  border-left: 3px solid #f0ebe0;
+}
+
+.variant-option-row {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.price-delta-input { text-align: right; }
+
+.add-option-btn {
+  align-self: flex-start;
+  padding: 6px 14px;
+  background: #fff;
+  border: 1.5px dashed #ccc;
+  border-radius: 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.add-option-btn:hover { border-color: #CC0000; color: #CC0000; }
+
+/* Menu card badge showing variant-group count */
+.menu-card-variants {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #A66A00;
+  margin-top: 4px;
+}
+
+/* Tablet/phone: stack the group row so labels don't get cramped */
+@media (max-width: 768px) {
+  .variant-group-row {
+    grid-template-columns: 1fr;
+  }
+  .variant-option-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── IMAGE UPLOAD ── */
+
+.image-upload-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.image-upload-preview {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid #f0ebe0;
+  flex-shrink: 0;
+}
+
+.image-upload-placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  border: 2px dashed #ddd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  color: #aaa;
+  text-align: center;
+  flex-shrink: 0;
+  padding: 4px;
+}
+
+.image-upload-btn {
+  padding: 10px 20px;
+  background: #fff8e1;
+  border: 1.5px solid #FFC200;
+  border-radius: 50px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #1a1a1a;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.image-upload-btn:hover { background: #FFC200; }
+.image-upload-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
