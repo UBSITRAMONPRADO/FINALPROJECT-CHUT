@@ -41,13 +41,13 @@
     @if (activeTab() === 'sales') {
       <div class="tab-content">
         <div class="summary-cards">
-         <div class="summary-card yellow">
-            <p class="summary-value">&#8369;{{ todaySalesNet() }}</p>
+          <div class="summary-card yellow">
+            <p class="summary-value">&#8369;{{ cartService.todaySales() }}</p>
             <p class="summary-label">Total Sales Today</p>
           </div>
           <div class="summary-card red">
             <p class="summary-label">Total Orders Today</p>
-            <p class="summary-value">{{ todayOrderCountNet() }}</p>
+            <p class="summary-value">{{ cartService.todayOrderCount() }}</p>
           </div>
           <div class="summary-card cream">
             <p class="summary-label">Items Sold</p>
@@ -107,7 +107,7 @@
       </div>
     }
   
-    <!-- NEW ORDER TAB -->
+    <!-- NEW ORDER TAB — now a POS-style flow: mode select → chip grid + floating dock + drawer -->
     @if (activeTab() === 'new-order') {
       <div class="tab-content">
   
@@ -130,90 +130,277 @@
             </div>
           </div>
         }
-  
+
         @if (orderStep() === 2) {
-          <div class="order-layout">
-            <div class="order-menu">
-              <div class="order-menu-header">
-                <h2>Step 2 — Select Items</h2>
-                <span class="order-mode-badge">{{ selectedTransaction() }}</span>
-              </div>
-  
-              <div class="category-filters">
-                @for (cat of categories; track cat) {
-                  <button
-                    class="filter-btn"
-                    [class.active]="selectedCategory() === cat"
-                    (click)="selectedCategory.set(cat)">
-                    {{ cat }}
-                  </button>
+          <div class="pos-topline">
+            <span class="pos-mode-badge">{{ selectedTransaction() }}</span>
+          </div>
+
+          <div class="pos-chips">
+            @for (cat of categories; track cat) {
+              <button
+                class="pos-chip"
+                [style.background]="selectedCategory() === cat ? categoryColor(cat) : '#fff'"
+                [style.color]="selectedCategory() === cat ? '#fff' : '#1a1a1a'"
+                [style.border-color]="selectedCategory() === cat ? categoryColor(cat) : 'rgba(0,0,0,0.08)'"
+                (click)="selectedCategory.set(cat)">
+                {{ cat }}
+              </button>
+            }
+          </div>
+
+          <div class="pos-grid">
+            @for (item of filteredItems(); track item._id) {
+              <div class="pos-card">
+                <div class="pos-card-img-wrap" [style.background]="lightBg(item.category)">
+                  <img [src]="item.image" [alt]="item.name" />
+                </div>
+                <p class="pos-card-name">{{ item.name }}</p>
+                <p class="pos-card-price" [style.color]="categoryColor(item.category)">&#8369;{{ item.price }}</p>
+                @if (item.variantGroups && item.variantGroups.length > 0) {
+                  <span class="pos-flavor-badge">🎚 Customize</span>
                 }
+                <button class="pos-add-btn" (click)="addItemToOrder(item, $event)">+</button>
               </div>
-  
-              <div class="order-grid">
-                @for (item of filteredItems(); track item._id) {
-                  <div class="order-item-card" (click)="cartService.addToCart(item)">
-                    <img [src]="item.image" [alt]="item.name" class="order-item-img" />
-                    <div class="order-item-info">
-                      <p class="order-item-name">{{ item.name }}</p>
-                      <p class="order-item-price">&#8369;{{ item.price }}</p>
+            }
+
+            @if (filteredItems().length === 0) {
+              <p class="empty-msg" style="grid-column: 1 / -1;">No items in this category.</p>
+            }
+          </div>
+
+          <!-- FLYING ITEM ANIMATIONS -->
+          @for (f of flyers(); track f.id) {
+            <div class="pos-flyer"
+                 [style.left.px]="f.startX"
+                 [style.top.px]="f.startY"
+                 [style.transform]="f.active ? 'translate(' + f.dx + 'px, ' + f.dy + 'px) scale(0.2)' : 'translate(0px, 0px) scale(1)'"
+                 [style.opacity]="f.active ? 0 : 1">
+              <img [src]="f.image" alt="" />
+            </div>
+          }
+
+          <!-- VARIANT PICKER SHEET (Shopee-style — multiple groups: Sauce,
+               Spice Level, Extras, etc; also reused for editing a cart line) -->
+          @if (variantPickerItem(); as vItem) {
+            <div class="pos-drawer-backdrop" (click)="closeVariantPicker()"></div>
+            <div class="pos-variant-sheet">
+              <div class="pos-drawer-header">
+                <h2 class="pos-drawer-title">Customize</h2>
+                <button class="pos-drawer-close" (click)="closeVariantPicker()">✕</button>
+              </div>
+
+              <div class="pos-variant-product">
+                <img [src]="vItem.image" [alt]="vItem.name" />
+                <div>
+                  <p class="pos-variant-product-name">{{ vItem.name }}</p>
+                  <p class="pos-variant-product-price" [style.color]="categoryColor(vItem.category)">
+                    &#8369;{{ vItem.price }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="pos-variant-groups">
+                @for (group of vItem.variantGroups; track group.name) {
+                  <div class="pos-variant-group">
+                    <div class="pos-group-heading">
+                      <span class="pos-group-name">{{ group.name }}</span>
+                      @if (group.required) {
+                        <span class="pos-group-required">Required</span>
+                      } @else {
+                        <span class="pos-group-optional">Optional</span>
+                      }
                     </div>
-                    <button class="order-add-btn">+ Add</button>
+                    <div class="pos-variant-options">
+                      @for (option of group.options; track option.label) {
+                        <button
+                          class="pos-variant-chip"
+                          [class.multi]="group.type === 'multi'"
+                          [class.selected]="isOptionSelected(group.name, option.label)"
+                          [style.background]="isOptionSelected(group.name, option.label) ? categoryColor(vItem.category) : '#fff'"
+                          [style.color]="isOptionSelected(group.name, option.label) ? '#fff' : '#1a1a1a'"
+                          [style.border-color]="isOptionSelected(group.name, option.label) ? categoryColor(vItem.category) : 'rgba(255,255,255,0.15)'"
+                          (click)="toggleGroupOption(group, option.label)">
+                          {{ option.label }}
+                          @if (option.priceDelta > 0) {
+                            <span class="pos-chip-price">+&#8369;{{ option.priceDelta }}</span>
+                          }
+                        </button>
+                      }
+                    </div>
                   </div>
                 }
               </div>
-            </div>
-  
-            <div class="order-cart">
-              <h2 class="order-cart-title">🛒 Current Order</h2>
-  
-              @if (cartService.cartItems().length === 0) {
-                <div class="order-cart-empty">
-                  <p>No items yet.</p>
-                  <p>Tap an item to add!</p>
+
+              <div class="pos-variant-footer">
+                <div class="pos-variant-qty">
+                  <button class="pos-qty-btn minus" (click)="decrementVariantQty()">−</button>
+                  <span>{{ variantQty() }}</span>
+                  <button class="pos-qty-btn plus" (click)="incrementVariantQty()">+</button>
                 </div>
-              } @else {
-                <div class="order-cart-items">
-                  @for (entry of cartService.cartItems(); track entry.item._id) {
-                    <div class="order-cart-item">
-                      <div class="order-cart-info">
-                        <p class="order-cart-name">{{ entry.item.name }}</p>
-                        <p class="order-cart-qty">x{{ entry.quantity }}</p>
-                      </div>
-                      <span class="order-cart-price">₱{{ entry.item.price * entry.quantity }}</span>
-                      <button class="order-remove-btn" (click)="cartService.removeFromCart(entry.item._id)">✕</button>
-                    </div>
+                <button class="pos-pay-btn pos-variant-confirm" [disabled]="!pickerCanConfirm()" (click)="confirmVariantAdd($event)">
+                  Add to Cart · &#8369;{{ pickerUnitPrice() * variantQty() }}
+                </button>
+              </div>
+            </div>
+          }
+
+          <!-- STICKY FLOATING DOCK -->
+          @if (cartService.cartItems().length > 0) {
+            <button class="pos-dock" [class.pulse]="dockPulse()" #dockRef (click)="openDrawer()">
+              <div class="pos-dock-left">
+               <div class="pos-dock-badge-wrap">
+                <img src="CART.png" alt="Basket" class="dock-badge-icon">
+                <span class="pos-dock-count">{{ cartService.cartCount() }}</span>
+              </div>
+                </div>
+                <div class="pos-dock-stack">
+                  @for (entry of cartService.cartItems().slice(0, 3); track entry.item._id + '-' + optionsKey(entry.selectedOptions)) {
+                    <img [src]="entry.item.image" [alt]="entry.item.name" />
                   }
                 </div>
-  
-                <div class="order-cart-footer">
-                  <div class="order-total-row">
-                    <span>Total</span>
-                    <span class="order-total-amt">₱{{ cartService.cartTotal() }}</span>
+              <div class="pos-dock-right">
+                <p class="pos-dock-label">View order</p>
+                <p class="pos-dock-total">&#8369;{{ cartService.cartTotal() }}</p>
+              </div>
+            </button>
+          }
+
+          <!-- CHECKOUT DRAWER -->
+          @if (drawerOpen()) {
+            <div class="pos-drawer-backdrop" (click)="!orderComplete() && closeDrawer()"></div>
+            <div class="pos-drawer">
+
+              @if (orderComplete()) {
+                <div class="pos-success">
+                  <div class="pos-success-icon">✓</div>
+                  <p class="pos-success-title">Preparing The Order!</p>
+                  <p class="pos-success-sub">{{ selectedTransaction() }} · {{ selectedPayment() }}</p>
+                  <div class="pos-pay-options" style="margin-top: 24px; width: 100%;">
+                    <button class="pos-pay-btn" (click)="newOrderFromSuccess()">+ New Order</button>
+                    <button class="pos-pay-btn pos-pay-btn-dark" (click)="seeOrderFromSuccess()">See Orders</button>
                   </div>
-                  <p class="payment-label">Select Payment:</p>
-                  <div class="payment-options">
-                    <button class="payment-opt-btn" (click)="selectPayment('Cash')"><img src="cash.png" alt="Cash" class="icon-sm"></button>
-                    <button class="payment-opt-btn" (click)="selectPayment('Online Payment')"><img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm"></button>
-                  </div>
-                  <button class="clear-order-btn" (click)="cartService.clearCart()">🗑️ Clear</button>
                 </div>
+              } @else {
+                <div class="pos-drawer-header">
+                <h2 class="pos-drawer-title"><img src="CART.png" alt="Basket" class="drawer-title-icon">Your Order</h2>
+                  <button class="pos-drawer-close" (click)="closeDrawer()">✕</button>
+                </div>
+
+             <div class="pos-drawer-list">
+                  @if (cartService.cartItems().length === 0) {
+                    <p class="pos-drawer-empty">Your basket is empty. Tap an item to add it!</p>
+                  } @else {
+                    @for (entry of cartService.cartItems(); track entry.item._id + '-' + optionsKey(entry.selectedOptions)) {
+                      <div class="pos-drawer-row">
+                        <div class="pos-drawer-row-top">
+                          <img [src]="entry.item.image" [alt]="entry.item.name" />
+                          <div class="pos-drawer-info">
+                            <p class="pos-drawer-name">{{ entry.item.name }}</p>
+                            <p class="pos-drawer-unit">&#8369;{{ lineUnitPrice(entry) }} each</p>
+                          </div>
+                          <div class="pos-drawer-qty">
+                            <button class="pos-qty-btn minus" (click)="cartService.decrementCartItem(entry.item._id, entry.selectedOptions)">−</button>
+                            <span>{{ entry.quantity }}</span>
+                            <button class="pos-qty-btn plus" (click)="cartService.addToCart(entry.item, entry.selectedOptions)">+</button>
+                          </div>
+                          <span class="pos-drawer-line-total">&#8369;{{ lineUnitPrice(entry) * entry.quantity }}</span>
+                        </div>
+
+                        <!-- Inline, tappable variant chips — edit flavor/sauce/extras
+                             right on the cart line, no need to reopen the picker sheet -->
+                        @if (entry.item.variantGroups && entry.item.variantGroups.length > 0) {
+                          <div class="pos-drawer-inline-groups">
+                            @for (group of entry.item.variantGroups; track group.name) {
+                              <div class="pos-drawer-inline-group">
+                                <p class="pos-drawer-inline-group-label">
+                                  {{ group.name }} ({{ group.type === 'single' ? 'Choose 1' : 'Choose any' }})
+                                </p>
+                                <div class="pos-drawer-inline-options">
+                                  @for (option of group.options; track option.label) {
+                                    <button
+                                      class="pos-drawer-inline-chip"
+                                      [class.selected]="isCartLineOptionSelected(entry, group.name, option.label)"
+                                      (click)="toggleCartLineOption(entry, group, option.label)">
+                                      {{ option.label }}
+                                      @if (option.priceDelta > 0) {
+                                        <span class="pos-chip-price">(+&#8369;{{ option.priceDelta }})</span>
+                                      }
+                                      @if (isCartLineOptionSelected(entry, group.name, option.label)) {
+                                        <span class="chip-check">✓</span>
+                                      }
+                                    </button>
+                                  }
+                                </div>
+                              </div>
+                            }
+                          </div>
+                        }
+
+                        @if (isInstructionsOpen(entry)) {
+                          <textarea
+                            class="pos-line-instructions-input"
+                            rows="2"
+                            placeholder="e.g. no ice, extra crispy, less spicy..."
+                            [value]="entry.specialInstructions ?? ''"
+                            (input)="updateLineInstructions(entry, $any($event.target).value)">
+                          </textarea>
+                        }
+
+                        <div class="pos-line-bottom-row">
+                          <div class="pos-line-links">
+                            <button class="pos-edit-link" (click)="editCartLine(entry)">✏️ Edit</button>
+                            <button class="pos-instructions-link" (click)="toggleInstructions(entry)">
+                              📝 Special instructions{{ entry.specialInstructions ? ' ✓' : ' (optional)' }}
+                            </button>
+                          </div>
+                          <button class="pos-remove-link" (click)="removeCartLine(entry)">🗑️ Remove</button>
+                        </div>
+                      </div>
+                    }
+                  }
+                </div>
+
+                @if (cartService.cartItems().length > 0) {
+                  <div class="pos-drawer-summary">
+                    <div class="pos-summary-total">
+                      <span>Total</span>
+                      <span>&#8369;{{ cartService.cartTotal() }}</span>
+                    </div>
+                    <p class="pos-pay-label">Select Payment</p>
+                    <div class="pos-pay-cards">
+                     <button class="pos-pay-card cash" (click)="selectPayment('Cash')">
+                        <img src="cash.png" alt="Cash" class="pos-pay-card-icon">
+                        <span class="pos-pay-card-text">
+                          <span class="pos-pay-card-title">Cash</span>
+                          <span class="pos-pay-card-sub">Pay with cash upon delivery</span>
+                        </span>
+                        <span class="pos-pay-card-chevron">›</span>
+                      </button>
+                      <button class="pos-pay-card gcash" (click)="selectPayment('Online Payment')">
+                        <img src="gcash-maya.jpg" alt="GCash / Maya" class="pos-pay-card-icon">
+                        <span class="pos-pay-card-text">
+                          <span class="pos-pay-card-title">GCash / Maya</span>
+                          <span class="pos-pay-card-sub">Pay securely using GCash or Maya</span>
+                        </span>
+                        <span class="pos-pay-card-chevron">›</span>
+                      </button>
+                    </div>
+                    <div class="pos-trust-badge">
+                      <span class="pos-trust-icon">🛡️</span>
+                      <span>
+                        <span class="pos-trust-title">Secure &amp; Safe Payment</span>
+                        <span class="pos-trust-sub">Your payment information is encrypted and secure.</span>
+                      </span>
+                    </div>
+                    <button class="pos-clear-link" (click)="cartService.clearCart()">🗑️ Clear order</button>
+                  </div>
+                }
               }
             </div>
-          </div>
+          }
         }
-  
-        @if (orderStep() === 3) {
-          <div class="order-success-card">
-            <div class="success-icon">✅</div>
-            <h2>Order Placed!</h2>
-            <p>Transaction: <strong>{{ selectedTransaction() }}</strong></p>
-            <p>Payment: <strong>{{ selectedPayment() }}</strong></p>
-            <button class="new-order-btn" (click)="newOrder()">+ New Order</button>
-            <button class="see-order-btn" (click)="seeOrder()">+ See Order</button>
-          </div>
-        }
-  
+
       </div>
     }
 
@@ -227,7 +414,6 @@
   
         <div class="dashboard-grid">
   
-        
           <!-- PENDING ORDERS -->
           <div class="dashboard-section">
             <h2> Orders Breakdown <span class="count-pill red">{{ pendingOrders().length }} pending</span></h2>
@@ -243,8 +429,14 @@
                     <span class="order-total">₱{{ entry.order.total }}</span>
                   </div>
                   <div class="order-items">
-                    @for (item of entry.order.items; track item.item._id) {
-                      <span class="order-item-tag">{{ item.item.name }} x{{ item.quantity }}</span>
+                   @for (item of entry.order.items; track item.item._id + '-' + optionsKey(item.selectedOptions)) {
+                    <span class="order-item-tag">
+                      {{ item.item.name }}
+                      @if (item.selectedOptions && item.selectedOptions.length > 0) {
+                        <span class="tag-variant">({{ formatOptions(item.selectedOptions) }})</span>
+                      }
+                      x{{ item.quantity }}
+                    </span>
                     }
                   </div>
                   <div class="order-actions">
@@ -255,11 +447,11 @@
                       ✕ Cancel
                     </button>
                   </div>
-                  </div>
-                }
+                </div>
               }
+            }
           </div>
-                    
+  
           <!-- DONE ORDERS -->
           <div class="dashboard-section">
             <h2> Done Orders <span class="count-pill green">{{ doneOrders().length }} completed</span></h2>
@@ -275,8 +467,14 @@
                     <span class="order-total">₱{{ entry.order.total }}</span>
                   </div>
                   <div class="order-items">
-                    @for (item of entry.order.items; track item.item._id) {
-                      <span class="order-item-tag">{{ item.item.name }} x{{ item.quantity }}</span>
+                   @for (item of entry.order.items; track item.item._id + '-' + optionsKey(item.selectedOptions)) {
+                      <span class="order-item-tag">
+                        {{ item.item.name }}
+                        @if (item.selectedOptions && item.selectedOptions.length > 0) {
+                          <span class="tag-variant">({{ formatOptions(item.selectedOptions) }})</span>
+                        }
+                        x{{ item.quantity }}
+                      </span>
                     }
                   </div>
                   <div class="order-actions between">
@@ -288,31 +486,37 @@
             }
           </div>
 
-           <!-- CANCELLED ORDERS -->
+          <!-- CANCELLED ORDERS -->
           <div class="dashboard-section">
-            <h2> Cancelled Orders <span class="count-pill grey">{{ cancelledOrders().length }} cancelled</span></h2>
+            <h2> Cancelled Orders <span class="count-pill red">{{ cancelledOrders().length }} cancelled</span></h2>
             @if (cancelledOrders().length === 0) {
               <p class="empty-msg">No cancelled orders.</p>
             } @else {
-              @for (entry of cancelledOrders(); track entry.order._id) {
-                <div class="order-card cancelled">
-                  <div class="order-header">
-                    <span class="order-id">Order #{{ entry.index }}</span>
-                    <span class="badge yellow">{{ entry.order.transactionMode }}</span>
-                    <span class="badge red">{{ entry.order.paymentMode }}</span>
-                    <span class="order-total">₱{{ entry.order.total }}</span>
+            @for (entry of cancelledOrders(); track entry.order._id) {
+                  <div class="order-card cancelled">
+                    <div class="order-header">
+                      <span class="order-id">Order #{{ entry.index }}</span>
+                      <span class="badge yellow">{{ entry.order.transactionMode }}</span>
+                      <span class="badge red">{{ entry.order.paymentMode }}</span>
+                      <span class="order-total">₱{{ entry.order.total }}</span>
+                    </div>
+                    <div class="order-items">
+                      @for (item of entry.order.items; track item.item._id + '-' + optionsKey(item.selectedOptions)) {
+                        <span class="order-item-tag">
+                          {{ item.item.name }}
+                          @if (item.selectedOptions && item.selectedOptions.length > 0) {
+                            <span class="tag-variant">({{ formatOptions(item.selectedOptions) }})</span>
+                          }
+                          x{{ item.quantity }}
+                        </span>
+                      }
+                    </div>
+                    <div class="order-actions between">
+                      <span class="cancelled-tag">✕ Cancelled</span>
+                      <button class="undo-btn" (click)="undoOrderCancelled(entry.order._id)">Undo</button>
+                    </div>
                   </div>
-                  <div class="order-items">
-                    @for (item of entry.order.items; track item.item._id) {
-                      <span class="order-item-tag">{{ item.item.name }} x{{ item.quantity }}</span>
-                    }
-                  </div>
-                  <div class="order-actions between">
-                    <span class="cancelled-tag">✕ Cancelled</span>
-                    <button class="undo-btn" (click)="undoOrderCancelled(entry.order._id)">Undo</button>
-                  </div>
-                </div>
-              }
+                }
             }
           </div>
   
