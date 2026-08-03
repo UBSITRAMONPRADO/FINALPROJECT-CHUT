@@ -1,6 +1,7 @@
 import { Component, inject, signal, computed, ViewChild, ElementRef } from '@angular/core';
 import { Router } from '@angular/router';
-import { CartServices, MenuItem, CartItem, SelectedOption, VariantGroup, optionsKey, unitPrice } from '../cart-services';
+import {CartServices, MenuItem, CartItem, SelectedOption, VariantGroup, BranchPricing,
+  optionsKey, unitPrice, priceForBranch } from '../cart-services';
 
 interface Flyer {
   id: string;
@@ -33,7 +34,6 @@ export class DashboardComponent {
   selectedPayment      = signal<string>('');
   categories = ['All', 'Chillers', 'Combos', 'Corndog', 'Fries', 'Wings & Drinks', 'Wings & Fries', 'Wings & Gravy', 'Wings & Rice'];
   selectedCategory = signal('All');
-
   filteredItems = computed(() => {
     const cat = this.selectedCategory();
     if (cat === 'All') return this.cartService.menuItems();
@@ -132,13 +132,14 @@ export class DashboardComponent {
   pickerUnitPrice = computed(() => {
     const item = this.variantPickerItem();
     if (!item) return 0;
-    return unitPrice(item, this.buildSelectedOptions(item));
+    const branch = this.currentStaff()?.branch ?? '';
+    return unitPrice(item, this.buildSelectedOptions(item), branch);
   });
 
   // ── MENU MANAGEMENT ──
   showMenuForm = signal(false);
   editingItem  = signal<MenuItem | null>(null);
-  newItem      = signal<Partial<MenuItem>>({ name: '', price: 0, category: '', description: '', image: '' });
+ newItem      = signal<Partial<MenuItem>>({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: [] });
 
   // ── SALES COMPUTED (cancelled orders excluded from every total) ──
   itemSales = computed(() => {
@@ -146,15 +147,16 @@ export class DashboardComponent {
     const map    = new Map<string, { name: string; qty: number; total: number; image: string }>();
     orders.forEach(order => {
       order.items.forEach(entry => {
+        const linePrice = priceForBranch(entry.item, order.branch);
         const existing = map.get(entry.item.name);
         if (existing) {
           existing.qty   += entry.quantity;
-          existing.total += entry.item.price * entry.quantity;
+          existing.total += linePrice * entry.quantity;
         } else {
           map.set(entry.item.name, {
             name:  entry.item.name,
             qty:   entry.quantity,
-            total: entry.item.price * entry.quantity,
+            total: linePrice * entry.quantity,
             image: entry.item.image
           });
         }
@@ -228,7 +230,6 @@ export class DashboardComponent {
     this.cartService.loadMenuItems();
     this.cartService.loadTodayOrders();
     this.cartService.loadSettings();
-    // Note: loadStaff() removed — staff management is manager-only
   }
 
   // ── CATEGORY COLOR CODING (used across chips, cards, and the flying icon) ──
@@ -246,6 +247,7 @@ export class DashboardComponent {
   }
 
   optionsKey = optionsKey; // exposed for the template's @for track expressions
+  priceForBranch = priceForBranch;
 
   // ── NEW ORDER METHODS ──
   selectTransaction(mode: string): void {
@@ -405,7 +407,8 @@ export class DashboardComponent {
   }
 
   lineUnitPrice(entry: CartItem): number {
-    return unitPrice(entry.item, entry.selectedOptions);
+    const branch = this.currentStaff()?.branch ?? '';
+    return unitPrice(entry.item, entry.selectedOptions, branch);
   }
 
   formatOptions(options: SelectedOption[]): string {
@@ -452,11 +455,10 @@ export class DashboardComponent {
 
   // ── MENU METHODS ──
   startAddItem(): void {
-    this.newItem.set({ name: '', price: 0, category: '', description: '', image: '' });
+    this.newItem.set({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: [] });
     this.editingItem.set(null);
     this.showMenuForm.set(true);
   }
-
   startEditItem(item: MenuItem): void {
     this.editingItem.set(item);
     this.newItem.set({ ...item });
@@ -464,8 +466,9 @@ export class DashboardComponent {
   }
 
   saveItem(): void {
-    const item = this.newItem();
-    if (!item.name || !item.price || !item.category) return;
+  const item = this.newItem();
+  const hasValidBranch = (item.branchPricing ?? []).some(bp => bp.price > 0);
+  if (!item.name || !item.category || !hasValidBranch) return;
     if (this.editingItem()) {
       this.cartService.updateMenuItem({ ...this.editingItem()!, ...item } as MenuItem);
     } else {
