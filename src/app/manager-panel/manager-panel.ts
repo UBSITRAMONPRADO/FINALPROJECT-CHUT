@@ -1,9 +1,11 @@
 import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { CartServices, MenuItem, Staff, OrderHistoryDay, SelectedOption, VariantGroup, optionsKey } from '../cart-services';
+import {CartServices, MenuItem, Staff, OrderHistoryDay, SelectedOption, VariantGroup, BranchPricing, optionsKey,
+        priceForBranch } from '../cart-services';
 
 type HistoryView = 'daily' | 'weekly' | 'monthly' | 'yearly';
+type BestSellerView = 'alltime' | 'yearly' | 'monthly' | 'weekly' | 'custom';
 
 @Component({
   selector: 'app-manager-panel',
@@ -17,6 +19,7 @@ export class ManagerPanelComponent implements OnDestroy {
 
   activeTab  = signal<string>('dashboard');
   successMsg = signal('');
+  errorMsg   = signal('');
   imageUploading = signal(false);
   allTransactionModes = ['Dine In', 'Take Out', 'Grab'];
   allPaymentModes     = ['Cash', 'Gcash/Maya'];
@@ -51,8 +54,20 @@ export class ManagerPanelComponent implements OnDestroy {
   // ── MENU MANAGEMENT ──
   showMenuForm  = signal(false);
   editingItem   = signal<MenuItem | null>(null);
-  newItem       = signal<Partial<MenuItem>>({ name: '', price: 0, category: '', description: '', image: '', variantGroups: [] });
+ newItem       = signal<Partial<MenuItem>>({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: this.defaultBranchPricing() });
 
+ //— branch sub-tabs ──
+activeMenuBranch = signal<string>(this.branches[0]);
+
+setMenuBranch(branch: string): void {
+  this.activeMenuBranch.set(branch);
+}
+
+menuItemsForActiveBranch = computed(() => this.cartService.menuItems());
+
+private defaultBranchPricing(): BranchPricing[] {
+  return this.branches.map(branch => ({ branch, price: 0, available: true }));
+}
   // ── STAFF MANAGEMENT ──
   showStaffForm  = signal(false);
   editingStaff   = signal<Staff | null>(null);
@@ -64,6 +79,25 @@ export class ManagerPanelComponent implements OnDestroy {
   // ── SALES HISTORY — grouping view (daily/weekly/monthly/yearly) ──
   historyView   = signal<HistoryView>('daily');
   expandedGroup = signal<string | null>(null);
+
+  // ── BEST SELLER — which period is selected on the Best Seller tab ──
+  bestSellerView = signal<BestSellerView>('alltime');
+
+  setBestSellerView(view: BestSellerView): void {
+    this.bestSellerView.set(view);
+  }
+
+  // ── BEST SELLER — custom date range (used only when bestSellerView === 'custom') ──
+  customStartDate = signal<string>('');
+  customEndDate   = signal<string>('');
+
+  setCustomStartDate(date: string): void {
+    this.customStartDate.set(date);
+  }
+
+  setCustomEndDate(date: string): void {
+    this.customEndDate.set(date);
+  }
 
   // ── CATEGORY COLOR CODING (matches the Employee Dashboard POS redesign) ──
   categoryColor(cat: string): string {
@@ -80,6 +114,8 @@ export class ManagerPanelComponent implements OnDestroy {
   }
 
   optionsKey = optionsKey; // exposed for the template's @for track expressions
+  priceForBranch = priceForBranch;
+
 
   // Formats a cart line's selected options for display, e.g. "Honey Butter, Hot".
   formatOptions(options: SelectedOption[]): string {
@@ -88,26 +124,27 @@ export class ManagerPanelComponent implements OnDestroy {
 
   // ── SALES COMPUTED (today) — cancelled orders excluded from every total ──
   itemSales = computed(() => {
-    const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
-    const map    = new Map<string, { name: string; qty: number; total: number; image: string }>();
-    orders.forEach(order => {
-      order.items.forEach(entry => {
-        const existing = map.get(entry.item.name);
-        if (existing) {
-          existing.qty   += entry.quantity;
-          existing.total += entry.item.price * entry.quantity;
-        } else {
-          map.set(entry.item.name, {
-            name:  entry.item.name,
-            qty:   entry.quantity,
-            total: entry.item.price * entry.quantity,
-            image: entry.item.image
-          });
-        }
-      });
+  const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
+  const map    = new Map<string, { name: string; qty: number; total: number; image: string }>();
+  orders.forEach(order => {
+    order.items.forEach(entry => {
+      const linePrice = priceForBranch(entry.item, order.branch);
+      const existing = map.get(entry.item.name);
+      if (existing) {
+        existing.qty   += entry.quantity;
+        existing.total += linePrice * entry.quantity;
+      } else {
+        map.set(entry.item.name, {
+          name:  entry.item.name,
+          qty:   entry.quantity,
+          total: linePrice * entry.quantity,
+          image: entry.item.image
+        });
+      }
     });
-    return Array.from(map.values()).sort((a, b) => b.qty - a.qty);
   });
+  return Array.from(map.values()).sort((a, b) => b.qty - a.qty);
+});
 
   // "Orders Breakdown" list — pending/completed orders only.
   allOrdersIndexed = computed(() =>
@@ -241,6 +278,197 @@ export class ManagerPanelComponent implements OnDestroy {
     days.forEach(d => d.orders.forEach(o => o.items.forEach(entry => names.add(entry.item.name))));
     return names.size;
   });
+
+  // ── BEST SELLER — date-range filter shared by the ranked list, branch
+  // performance bars, and growth comparison below, so they all agree on
+  // what "this period" means for the selected view. ──
+  private filteredDaysForBestSeller(view: BestSellerView, days: OrderHistoryDay[]): OrderHistoryDay[] {
+    if (view === 'yearly') {
+      const year = String(new Date().getFullYear());
+      return days.filter(d => d.date.startsWith(year));
+    } else if (view === 'monthly') {
+      const monthKey = this.toDateStr(new Date()).slice(0, 7); // "YYYY-MM"
+      return days.filter(d => d.date.startsWith(monthKey));
+    } else if (view === 'weekly') {
+      const currentWeekKey = this.weekKey(this.toDateStr(new Date()));
+      return days.filter(d => this.weekKey(d.date) === currentWeekKey);
+    } else if (view === 'custom') {
+      const start = this.customStartDate();
+      const end = this.customEndDate();
+      return days.filter(d => (!start || d.date >= start) && (!end || d.date <= end));
+    }
+    return days; // 'alltime' — no filter
+  }
+
+  filteredBestSellerDays = computed(() =>
+    this.filteredDaysForBestSeller(this.bestSellerView(), this.cartService.salesHistory())
+  );
+
+  // ── BEST SELLERS — ranked by quantity sold for the selected period
+  // (alltime / yearly / monthly / weekly / custom), with the branches
+  // each item sold at. Cancelled orders are already excluded server-side,
+  // so no extra filtering is needed here. ──
+  bestSellers = computed(() => {
+    const days = this.filteredBestSellerDays();
+    const tally = new Map<string, { name: string; qty: number; branches: Set<string> }>();
+
+    days.forEach(d => {
+      d.orders.forEach(order => {
+        order.items.forEach((entry: any) => {
+          const key = entry.item.name;
+          const row = tally.get(key) ?? { name: entry.item.name, qty: 0, branches: new Set<string>() };
+          row.qty += entry.quantity;
+          row.branches.add(order.branch ?? 'Unknown');
+          tally.set(key, row);
+        });
+      });
+    });
+
+    return Array.from(tally.values())
+      .map(r => ({ name: r.name, qty: r.qty, branches: Array.from(r.branches) }))
+      .sort((a, b) => b.qty - a.qty);
+  });
+
+  // Total units sold across all items in the selected period.
+  bestSellerTotalQty = computed(() => this.bestSellers().reduce((sum, i) => sum + i.qty, 0));
+
+  // Units sold per branch in the selected period (any item, not just the top seller).
+  bestSellerBranchTally = computed(() => {
+    const map = new Map<string, number>();
+    this.filteredBestSellerDays().forEach(d => {
+      d.orders.forEach((order: any) => {
+        const branch = order.branch ?? 'Unknown';
+        const qty = order.items.reduce((s: number, e: any) => s + e.quantity, 0);
+        map.set(branch, (map.get(branch) ?? 0) + qty);
+      });
+    });
+    return map;
+  });
+
+  // Branch performance bars — each branch's share of units sold this period.
+  branchPerformance = computed(() => {
+    const tally = this.bestSellerBranchTally();
+    const total = Array.from(tally.values()).reduce((sum, v) => sum + v, 0);
+    return this.branches
+      .map(branch => {
+        const qty = tally.get(branch) ?? 0;
+        return { branch, qty, percent: total > 0 ? Math.round((qty / total) * 100) : 0 };
+      })
+      .sort((a, b) => b.qty - a.qty);
+  });
+
+  bestSellerBestBranch = computed(() => {
+    const perf = this.branchPerformance();
+    return perf.length > 0 && perf[0].qty > 0 ? perf[0].branch : '—';
+  });
+
+  // Growth — compares total units sold in the current period against the
+  // immediately preceding period of equal length. For 'alltime' (which has
+  // no natural "previous" period), it compares the trailing 30 days against
+  // the 30 days before that instead.
+  bestSellerGrowth = computed((): { percent: number | null; label: string } | null => {
+    const allDays = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date));
+    if (allDays.length < 2) return null;
+
+    const current = this.filteredBestSellerDays();
+    if (current.length === 0) return null;
+
+    let currentDates: string[];
+    let label: string;
+
+    if (this.bestSellerView() === 'alltime') {
+      currentDates = allDays.map(d => d.date).slice(-30);
+      label = 'vs previous 30 days';
+    } else {
+      currentDates = current.map(d => d.date).sort();
+      label = 'vs previous period';
+    }
+
+    const rangeLen = currentDates.length;
+    const earliestCurrent = currentDates[0];
+    const priorDates = allDays.filter(d => d.date < earliestCurrent).slice(-rangeLen).map(d => d.date);
+
+    const sumQty = (dates: string[]) => {
+      const set = new Set(dates);
+      return allDays
+        .filter(d => set.has(d.date))
+        .reduce((sum, d) => sum + d.orders.reduce((s: number, o: any) =>
+          s + o.items.reduce((si: number, e: any) => si + e.quantity, 0), 0), 0);
+    };
+
+    const currentQty = sumQty(currentDates);
+    const priorQty = sumQty(priorDates);
+
+    if (priorDates.length === 0 || priorQty === 0) return { percent: null, label };
+
+    const percent = Math.round(((currentQty - priorQty) / priorQty) * 100);
+    return { percent, label };
+  });
+
+  // Looks up the current menu image for a best-seller row by item name.
+  bestSellerImage(name: string): string {
+    const item = this.cartService.menuItems().find(i => i.name === name);
+    return item?.image || 'chutchut.jpg';
+  }
+
+  // Sales trend for the #1 best seller — last 7 days, oldest to newest.
+  topSellerTrend = computed(() => {
+    const w = 400, h = 140, padding = 24;
+    const top = this.bestSellers()[0];
+    const empty = { points: [] as any[], linePath: '', areaPath: '', labels: [] as any[], w, h };
+    if (!top) return empty;
+
+    const days = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+    if (days.length === 0) return empty;
+
+    const qtyPerDay = days.map(d => {
+      let qty = 0;
+      d.orders.forEach((o: any) => o.items.forEach((e: any) => { if (e.item.name === top.name) qty += e.quantity; }));
+      return { date: d.date, qty };
+    });
+
+    const maxQty = Math.max(1, ...qtyPerDay.map(d => d.qty));
+    const stepX = qtyPerDay.length > 1 ? (w - padding * 2) / (qtyPerDay.length - 1) : 0;
+
+    const points = qtyPerDay.map((d, i) => ({
+      x: padding + i * stepX,
+      y: h - padding - (d.qty / maxQty) * (h - padding * 2),
+      date: d.date,
+      qty: d.qty
+    }));
+
+    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+    const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - padding} L ${points[0].x.toFixed(1)} ${h - padding} Z`;
+
+    const labels = points.map(p => ({
+      date: p.date,
+      short: new Date(p.date + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short' })
+    }));
+
+    return { points, linePath, areaPath, labels, w, h };
+  });
+
+  // Exports the currently displayed best-seller ranking as a CSV.
+  exportBestSellers(): void {
+    const rows = this.bestSellers();
+    const header = 'Rank,Name,Quantity Sold,Branches\n';
+    const body = rows.map((r, i) => `${i + 1},"${r.name}",${r.qty},"${r.branches.join('; ')}"`).join('\n');
+    const csv = header + body;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `best-sellers-${this.bestSellerView()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private toDateStr(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
 
   historyTransactionTotals = computed(() => {
     const days = this.cartService.salesHistory();
@@ -387,9 +615,51 @@ export class ManagerPanelComponent implements OnDestroy {
     this.showSuccess('Today\'s sales have been reset!');
   }
 
+  // ── DANGER ZONE — bulk-clear actions (Settings tab). Both are
+  // permanent and affect every branch, so each is gated behind a
+  // native confirm() prompt before touching the backend. ──
+  clearAllOrders(): void {
+    const confirmed = confirm(
+      'This will permanently delete ALL orders and sales history for every branch. This cannot be undone. Continue?'
+    );
+    if (!confirmed) return;
+
+    this.cartService.clearAllOrders(
+      () => {
+        this.cartService.loadTodayOrders();
+        this.cartService.loadOrdersHistory();
+        this.showSuccess('All orders and transactions cleared.');
+      },
+      (err) => {
+        const detail = err?.error?.message || err?.message || `HTTP ${err?.status ?? 'error'}`;
+        this.showError(`Clear orders failed — ${detail}`);
+      }
+    );
+  }
+
+  clearAllStaff(): void {
+    const confirmed = confirm(
+      'This will permanently delete ALL staff accounts for every branch. This cannot be undone. Continue?'
+    );
+    if (!confirmed) return;
+
+    this.cartService.clearAllStaff(
+      () => this.showSuccess('All staff accounts cleared.'),
+      (err) => {
+        const detail = err?.error?.message || err?.message || `HTTP ${err?.status ?? 'error'}`;
+        this.showError(`Clear staff failed — ${detail}`);
+      }
+    );
+  }
+
   showSuccess(msg: string): void {
     this.successMsg.set(msg);
     setTimeout(() => this.successMsg.set(''), 3000);
+  }
+
+  showError(msg: string): void {
+    this.errorMsg.set(msg);
+    setTimeout(() => this.errorMsg.set(''), 4000);
   }
 
   // ── BACKUP EXPORT ──
@@ -460,30 +730,53 @@ export class ManagerPanelComponent implements OnDestroy {
   }
 
   // ── MENU METHODS ──
-  startAddItem(): void {
-    this.newItem.set({ name: '', price: 0, category: '', description: '', image: '', variantGroups: [] });
-    this.editingItem.set(null);
-    this.showMenuForm.set(true);
-  }
+    startAddItem(): void {
+      this.newItem.set({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: this.defaultBranchPricing() });
+      this.editingItem.set(null);
+      this.showMenuForm.set(true);
+    }
 
-  startEditItem(item: MenuItem): void {
-    this.editingItem.set(item);
-    // Deep-clone variantGroups so editing the form doesn't mutate the
-    // original item (or another row sharing the same object reference)
-    // before Save is actually clicked.
-    this.newItem.set({
-      ...item,
-      variantGroups: (item.variantGroups ?? []).map(g => ({
-        ...g,
-        options: g.options.map(o => ({ ...o }))
-      }))
-    });
-    this.showMenuForm.set(true);
-  }
+      startEditItem(item: MenuItem): void {
+      this.editingItem.set(item);
+      const existingPricing = item.branchPricing ?? [];
+      const branchPricing = this.branches.map(branch => {
+        const found = existingPricing.find(bp => bp.branch === branch);
+        return found ? { ...found } : { branch, price: 0 };
+      });
 
-  saveItem(): void {
-    const item = this.newItem();
-    if (!item.name || !item.price || !item.category) return;
+      // Deep-clone variantGroups so editing the form doesn't mutate the
+      // original item (or another row sharing the same object reference)
+      // before Save is actually clicked.
+      this.newItem.set({
+        ...item,
+        branchPricing,
+        variantGroups: (item.variantGroups ?? []).map(g => ({
+          ...g,
+          options: g.options.map(o => ({ ...o }))
+        }))
+      });
+      this.showMenuForm.set(true);
+    }
+
+      saveItem(): void {
+        const item = this.newItem();
+
+        // Each check reports exactly why nothing was saved, instead of
+        // silently doing nothing — this was previously a bare `return`,
+        // which is what made Save look broken when a field was missing.
+        if (!item.name?.trim()) {
+          this.showError('Please enter an item name.');
+          return;
+        }
+        if (!item.category) {
+          this.showError('Please select a category.');
+          return;
+        }
+        const hasValidBranch = (item.branchPricing ?? []).some(bp => bp.price > 0);
+        if (!hasValidBranch) {
+          this.showError('Please set a price greater than ₱0 for at least one branch.');
+          return;
+        }
 
     // Drop groups/options left blank in the editor rather than saving
     // empty placeholders.
@@ -493,15 +786,33 @@ export class ManagerPanelComponent implements OnDestroy {
 
     const finalItem = { ...item, variantGroups: cleanedGroups };
 
+    // The form only closes and shows a success message once the backend
+    // actually confirms the save — if the request fails (e.g. a rejected
+    // POST), the form stays open with the entered data intact and the
+    // real error is shown, instead of quietly discarding the input.
+    const onSaved = (msg: string) => {
+      this.showSuccess(msg);
+      this.showMenuForm.set(false);
+      this.editingItem.set(null);
+    };
+    const onFailed = (err: any) => {
+      const detail = err?.error?.message || err?.message || `HTTP ${err?.status ?? 'error'}`;
+      this.showError(`Save failed — ${detail}`);
+    };
+
     if (this.editingItem()) {
-      this.cartService.updateMenuItem({ ...this.editingItem()!, ...finalItem } as MenuItem);
-      this.showSuccess('Item updated!');
+      this.cartService.updateMenuItem(
+        { ...this.editingItem()!, ...finalItem } as MenuItem,
+        () => onSaved('Item updated!'),
+        onFailed
+      );
     } else {
-      this.cartService.addMenuItem(finalItem as Omit<MenuItem, '_id'>);
-      this.showSuccess('Item added!');
+      this.cartService.addMenuItem(
+        finalItem as Omit<MenuItem, '_id'>,
+        () => onSaved('Item added!'),
+        onFailed
+      );
     }
-    this.showMenuForm.set(false);
-    this.editingItem.set(null);
   }
 
   deleteItem(itemId: string): void {
@@ -558,6 +869,14 @@ export class ManagerPanelComponent implements OnDestroy {
     const groups = (this.newItem().variantGroups ?? []).filter((_, i) => i !== groupIndex);
     this.newItem.set({ ...this.newItem(), variantGroups: groups });
   }
+
+  updateBranchPrice(branch: string, price: number): void {
+  const branchPricing = (this.newItem().branchPricing ?? []).map(bp =>
+    bp.branch === branch ? { ...bp, price } : bp
+  );
+  this.newItem.set({ ...this.newItem(), branchPricing });
+}
+
 
   updateGroupName(groupIndex: number, value: string): void {
     const groups = [...(this.newItem().variantGroups ?? [])];
