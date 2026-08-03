@@ -8,9 +8,82 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
+
 const app = express();
-app.use(cors());
+
+// ── TRUST RENDER'S PROXY ──
+// Render sits in front of your app behind a reverse proxy, so without this
+// every request looks like it comes from the same internal IP — which
+// breaks IP-based rate limiting below (everyone would share one bucket).
+app.set('trust proxy', 1);
+
+// ── SECURITY HEADERS ──
+app.use(helmet());
+
+// ── CORS — locked down to known frontend origins only ──
+// Add every domain your Angular app is actually served from (production +
+// local dev). Anything not in this list is blocked from calling the API
+// directly from a browser.
+const allowedOrigins = [
+  'http://localhost:4200','https://chutchut-project-hazel.vercel.app/',               // local Angular dev server
+  process.env.FRONTEND_URL                 // set this in your .env / Render env vars,
+                                  
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. curl, Postman, server-to-server)
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  credentials: true
+}));
+
 app.use(express.json());
+
+// ── STRIP MONGO OPERATORS FROM USER INPUT ──
+// Blocks NoSQL-injection payloads like { "password": { "$ne": null } }
+// from reaching Mongoose queries.
+app.use(mongoSanitize());
+
+// ── RATE LIMITING ──
+// General ceiling across the whole API.
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,                 // 300 requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+app.use(generalLimiter);
+
+// Tighter limit just for login attempts — slows down password guessing
+// without affecting normal POS/menu/dashboard traffic.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                  // 10 attempts per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please wait 15 minutes and try again.' }
+});
+
+// ── ADMIN GATE FOR ONE-OFF MIGRATION / SEED ROUTES ──
+// These routes are meant to be run once, by you, not left open to the
+// internet. Set ADMIN_KEY in your .env / Render env vars, then call these
+// routes with a header: x-admin-key: <your key>
+function requireAdminKey(req, res, next) {
+  const key = req.header('x-admin-key');
+  if (!process.env.ADMIN_KEY || key !== process.env.ADMIN_KEY) {
+    return res.status(403).send({ error: 'Forbidden — missing or invalid admin key.' });
+  }
+  next();
+}
 
 // ── IMAGE UPLOADS ──
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -343,7 +416,7 @@ async function getMergedDailyHistory(orders) {
 
 
 //  LOGIN ENDPOINTS
-app.post('/api/login/manager', async (req, res) => {
+app.post('/api/login/manager', loginLimiter, async (req, res) => {
   const { password } = req.body;
   let settings = await KioskSettings.findOne();
   if (!settings) { settings = new KioskSettings(); await settings.save(); }
@@ -353,7 +426,7 @@ app.post('/api/login/manager', async (req, res) => {
   res.status(401).send({ success: false, message: 'Incorrect manager password' });
 });
 
-app.post('/api/login/staff', async (req, res) => {
+app.post('/api/login/staff', loginLimiter, async (req, res) => {
   const { staffCode, password } = req.body;
   const staff = await Staff.findOne({ staffCode });
   if (!staff) return res.status(401).send({ success: false, message: 'Staff code not found' });
@@ -404,6 +477,19 @@ app.put('/api/staff/:id', async (req, res) => {
   const member = await Staff.findByIdAndUpdate(req.params.id, req.body, { new: true });
   if (!member) return res.status(404).send({ error: 'Staff not found' });
   res.send(member);
+});
+
+// DELETE — permanently wipes ALL staff accounts across every branch.
+// Must be declared BEFORE '/api/staff/:id' or Express matches "all" as an :id.
+app.delete('/api/staff/all', async (req, res) => {
+  try {
+    const result = await Staff.deleteMany({});
+    console.log(`Cleared ALL staff: ${result.deletedCount} deleted`);
+    res.send({ message: `Cleared ${result.deletedCount} staff members` });
+  } catch (err) {
+    console.error('Failed to clear all staff:', err);
+    res.status(500).send({ error: 'Failed to clear all staff' });
+  }
 });
 
 app.delete('/api/staff/:id', async (req, res) => {
@@ -500,6 +586,20 @@ app.patch('/api/orders/:id/uncancel', async (req, res) => {
   res.send(order);
 });
 
+// DELETE — permanently wipes ALL orders + all archived daily summaries,
+// across every branch. Unlike /reset (today only), this has no undo.
+app.delete('/api/orders/all', async (req, res) => {
+  try {
+    const result = await Order.deleteMany({});
+    await DailySales.deleteMany({});
+    console.log(`Cleared ALL orders: ${result.deletedCount} deleted, plus all daily summaries`);
+    res.send({ message: `Cleared ${result.deletedCount} orders and all sales history` });
+  } catch (err) {
+    console.error('Failed to clear all orders:', err);
+    res.status(500).send({ error: 'Failed to clear all orders' });
+  }
+});
+
 // DELETE reset — clears TODAY's orders only.
 // Past days are kept in DB so history is never lost.
 app.delete('/api/orders/reset', async (req, res) => {
@@ -521,10 +621,11 @@ app.delete('/api/orders/reset', async (req, res) => {
 // ══════════════════════════════════════════
 //  ONE-TIME MIGRATION — backfill displayId for existing orders
 //  that were created before branch order numbering existed.
-//  Run once (e.g. via curl/Postman: POST /api/migrate/branch-order-numbers),
-//  confirm the response, then remove this route.
+//  GATED behind ADMIN_KEY — see requireAdminKey() above. Call with header
+//  x-admin-key: <your ADMIN_KEY>. Remove this route entirely once you've
+//  run it and confirmed the response.
 // ══════════════════════════════════════════
-app.post('/api/migrate/branch-order-numbers', async (req, res) => {
+app.post('/api/migrate/branch-order-numbers', requireAdminKey, async (req, res) => {
   const branches = Object.keys(branchCodes);
   let updatedCount = 0;
 
@@ -546,13 +647,10 @@ app.post('/api/migrate/branch-order-numbers', async (req, res) => {
 //  ONE-TIME MIGRATION — applies full variant groups (Sauce/Flavor, Spice
 //  Level, Extras) to every menu category, and consolidates the 3 separate
 //  Giant Twirl items into one item with a Flavor group.
-//  This supersedes the old /api/migrate/add-variants (single flavor list)
-//  route — that field is no longer used by the schema.
-//  Run once (POST /api/migrate/add-variant-groups), confirm the response,
-//  then remove this route. Defaults below are a starting point — adjust
-//  any item's groups afterward from the Manager Panel Menu tab.
+//  GATED behind ADMIN_KEY. Call with header x-admin-key: <your ADMIN_KEY>.
+//  Remove this route entirely once you've run it and confirmed the response.
 // ══════════════════════════════════════════
-app.post('/api/migrate/add-variant-groups', async (req, res) => {
+app.post('/api/migrate/add-variant-groups', requireAdminKey, async (req, res) => {
   const opt = (label, priceDelta = 0) => ({ label, priceDelta });
 
   // Chicken items — Wings & Rice/Fries/Gravy/Drinks, Combos
@@ -815,11 +913,11 @@ const menuSeedData = [
   { name: "Sundae's Best Caramel Nut Crunch", price: 50, category: 'Chillers', description: 'Rocky road sundae with toppings', image: 'caramel.png', variantGroups: chillersVariantGroups },
   { name: "Sundae's Best Strawberry Crunch", price: 50, category: 'Chillers', description: 'Graham pampig sundae with toppings', image: 'strawberry.png', variantGroups: chillersVariantGroups },
 ];
-app.post('/api/menu', async (req, res) => {
-  const item = new MenuItem(req.body);
-  await item.save();
-  res.status(201).send(item);
-});
+
+const staffSeedData = [
+  { staffCode: 'EMP001', name: 'Juan Dela Cruz', contact: '09123456789', status: 'Active', dateAdded: '2026-06-01', password: 'juan2024' },
+  { staffCode: 'EMP002', name: 'Maria Santos', contact: '09987654321', status: 'Active', dateAdded: '2026-06-01', password: 'maria2024' },
+];
 
 // ══════════════════════════════════════════
 //  IMAGE UPLOAD ENDPOINT
@@ -843,7 +941,8 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.post('/api/seed', async (req, res) => {
+// ── SEED — GATED behind ADMIN_KEY. Call with header x-admin-key: <your ADMIN_KEY>.
+app.post('/api/seed', requireAdminKey, async (req, res) => {
   const existingMenu  = await MenuItem.countDocuments();
   const existingStaff = await Staff.countDocuments();
   if (existingMenu > 0 || existingStaff > 0) {
