@@ -15,14 +15,27 @@ export interface VariantGroup {
   options: VariantOption[];
 }
 
+export interface BranchPricing {
+  branch: string;
+  price: number;
+}
+
 export interface MenuItem {
   _id: string;
   name: string;
-  price: number;
   category: string;
   description: string;
   image: string;
-  variantGroups?: VariantGroup[]; // empty/undefined = no picker, item adds to cart instantly
+  variantGroups: VariantGroup[];
+  branchPricing: BranchPricing[]; // replaces the old single `price: number`
+}
+
+export function priceForBranch(item: MenuItem, branch: string): number {
+  return item.branchPricing?.find(bp => bp.branch === branch)?.price ?? 0;
+}
+
+export function isAvailableAtBranch(item: MenuItem, branch: string): boolean {
+  return item.branchPricing?.some(bp => bp.branch === branch && bp.price) ?? false;
 }
 
 export interface SelectedOption {
@@ -49,8 +62,8 @@ export function optionsKey(selectedOptions: SelectedOption[]): string {
     .join('|');
 }
 
-export function unitPrice(item: MenuItem, selectedOptions: SelectedOption[]): number {
-  return item.price + selectedOptions.reduce((sum, o) => sum + o.priceDelta, 0);
+export function unitPrice(item: MenuItem, selectedOptions: SelectedOption[], branch: string): number {
+  return priceForBranch(item, branch) + selectedOptions.reduce((sum, o) => sum + o.priceDelta, 0);
 }
 
 export interface CompletedOrder {
@@ -107,6 +120,9 @@ export interface BackupPayload {
   providedIn: 'root'
 })
 export class CartServices {
+getKioskBranch(): string {
+throw new Error('Method not implemented.');
+}
 
   private http = inject(HttpClient);
   private api = 'https://finalproject-chut-2.onrender.com/api';
@@ -125,9 +141,13 @@ export class CartServices {
   // ── CART ──
   cartItems = signal<CartItem[]>([]);
 
-  cartTotal = computed(() =>
-    this.cartItems().reduce((sum, e) => sum + unitPrice(e.item, e.selectedOptions) * e.quantity, 0)
+ cartTotal = computed(() => {
+  const branch = this.currentStaff()?.branch ?? this.kioskBranch();
+  return this.cartItems().reduce(
+    (sum, e) => sum + unitPrice(e.item, e.selectedOptions, branch) * e.quantity,
+    0
   );
+});
 
   cartCount = computed(() =>
     this.cartItems().reduce((sum, e) => sum + e.quantity, 0)
@@ -156,6 +176,12 @@ export class CartServices {
   staffList    = signal<Staff[]>([]);
   currentStaff = signal<Staff | null>(null);
 
+  // Returns the kiosk's active branch when no staff is logged in.
+  // Falls back to the first known staff branch or a sensible default.
+  private kioskBranch(): Staff['branch'] | string {
+    return this.staffList()[0]?.branch ?? 'Harrison Bazaar';
+  }
+
   // ── SALES HISTORY (all past days, computed live from DB orders) ──
   salesHistory = signal<OrderHistoryDay[]>([]);
 
@@ -171,6 +197,7 @@ export class CartServices {
       this.menuItems.set(items);
     });
   }
+  
 
   loadStaff(): void {
     this.http.get<Staff[]>(`${this.api}/staff`).subscribe(staff => {
@@ -328,6 +355,23 @@ export class CartServices {
     });
   }
 
+  // Permanently deletes EVERY order across every branch and date — unlike
+  // resetDailySales() above, which only clears today. Requires a matching
+  // `DELETE /api/orders/all` route on the backend (see server.js note).
+  clearAllOrders(onComplete?: () => void, onError?: (err: any) => void): void {
+    this.http.delete(`${this.api}/orders/all`).subscribe({
+      next: () => {
+        this.completedOrders.set([]);
+        this.salesHistory.set([]);
+        if (onComplete) onComplete();
+      },
+      error: (err) => {
+        console.error('Clear all orders failed:', err);
+        if (onError) onError(err);
+      }
+    });
+  }
+
   // ══════════════════════════════════════════
   //  CANCEL / UNCANCEL ORDER
   //  Soft-cancels an order on the backend — it stays in the DB and in
@@ -365,15 +409,34 @@ export class CartServices {
   //  MENU ITEM METHODS
   // ══════════════════════════════════════════
 
-  addMenuItem(item: Omit<MenuItem, '_id'>): void {
-    this.http.post<MenuItem>(`${this.api}/menu`, item).subscribe(saved => {
-      this.menuItems.set([...this.menuItems(), saved]);
+  // onSuccess/onError let the caller know whether the save actually
+  // persisted, instead of assuming success the moment the request is
+  // fired — previously nothing surfaced a failed POST, so a rejected
+  // save (e.g. backend validation error) looked identical to a working
+  // one from the Manager Panel's point of view.
+  addMenuItem(item: Omit<MenuItem, '_id'>, onSuccess?: () => void, onError?: (err: any) => void): void {
+    this.http.post<MenuItem>(`${this.api}/menu`, item).subscribe({
+      next: (saved) => {
+        this.menuItems.set([...this.menuItems(), saved]);
+        if (onSuccess) onSuccess();
+      },
+      error: (err) => {
+        console.error('Add menu item failed:', err);
+        if (onError) onError(err);
+      }
     });
   }
 
-  updateMenuItem(item: MenuItem): void {
-    this.http.put<MenuItem>(`${this.api}/menu/${item._id}`, item).subscribe(updated => {
-      this.menuItems.set(this.menuItems().map(m => m._id === updated._id ? updated : m));
+  updateMenuItem(item: MenuItem, onSuccess?: () => void, onError?: (err: any) => void): void {
+    this.http.put<MenuItem>(`${this.api}/menu/${item._id}`, item).subscribe({
+      next: (updated) => {
+        this.menuItems.set(this.menuItems().map(m => m._id === updated._id ? updated : m));
+        if (onSuccess) onSuccess();
+      },
+      error: (err) => {
+        console.error('Update menu item failed:', err);
+        if (onError) onError(err);
+      }
     });
   }
 
@@ -430,6 +493,22 @@ export class CartServices {
   removeStaff(staffId: string): void {
     this.http.delete(`${this.api}/staff/${staffId}`).subscribe(() => {
       this.staffList.set(this.staffList().filter(s => s._id !== staffId));
+    });
+  }
+
+  // Permanently deletes EVERY staff account across every branch. Requires
+  // a matching `DELETE /api/staff/all` route on the backend (see
+  // server.js note).
+  clearAllStaff(onComplete?: () => void, onError?: (err: any) => void): void {
+    this.http.delete(`${this.api}/staff/all`).subscribe({
+      next: () => {
+        this.staffList.set([]);
+        if (onComplete) onComplete();
+      },
+      error: (err) => {
+        console.error('Clear all staff failed:', err);
+        if (onError) onError(err);
+      }
     });
   }
 
