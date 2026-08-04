@@ -347,10 +347,16 @@ throw new Error('Method not implemented.');
     });
   }
 
-  // Clears today's orders only — past days remain in DB
+  // Soft-resets the live "Today" view on the Manager Dashboard and every
+  // Employee Dashboard. This does NOT delete any orders — it just moves a
+  // marker on the backend forward to "now", so GET /api/orders/today stops
+  // returning orders placed before that moment. The Transactions tab and
+  // Sales History tab pull from the full Order history independently of
+  // this marker, so every order placed today keeps showing there,
+  // unaffected, both before and after the reset.
   resetDailySales(onComplete?: () => void): void {
-    this.http.delete(`${this.api}/orders/reset`).subscribe(() => {
-      this.completedOrders.set([]);
+    this.http.patch(`${this.api}/dashboard/reset`, {}).subscribe(() => {
+      this.completedOrders.set([]); // instant local feedback; server truth confirmed on next poll
       if (onComplete) onComplete();
     });
   }
