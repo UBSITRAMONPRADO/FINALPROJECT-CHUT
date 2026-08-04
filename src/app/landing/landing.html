@@ -3,7 +3,7 @@
       <img src="chutchut.jpg" alt="Chut Chut" class="landing-logo" />
       <h1 class="landing-title">CHUT CHUT</h1>
       <p class="landing-sub">Wings • Corndog • Bilo-Bilo</p>
-  
+
       <div class="login-section">
         <input
           type="text"
@@ -12,6 +12,7 @@
           [value]="staffCode()"
           (input)="staffCode.set($any($event.target).value)"
           (keydown.enter)="login()"
+          [disabled]="loading()"
         />
         <input
           type="password"
@@ -20,11 +21,14 @@
           [value]="password()"
           (input)="password.set($any($event.target).value)"
           (keydown.enter)="login()"
+          [disabled]="loading()"
         />
         @if (error()) {
           <p class="login-error">❌ {{ error() }}</p>
         }
-        <button class="login-btn" (click)="login()">Login</button>
+        <button class="login-btn" (click)="login()" [disabled]="loading()">
+          {{ loading() ? 'Logging in…' : 'Login' }}
+        </button>
       </div>
     </div>
   </div>
