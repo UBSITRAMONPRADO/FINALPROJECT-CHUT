@@ -46,7 +46,7 @@
                 <p class="cart-panel-name">{{ entry.item.name }}</p>
                 <p class="cart-panel-qty">x{{ entry.quantity }}</p>
               </div>
-              <span class="cart-panel-price">₱{{ entry.item.price * entry.quantity }}</span>
+             <span class="cart-panel-price">₱{{ lineTotal(entry) }}</span>
             </div>
           }
         </div>
