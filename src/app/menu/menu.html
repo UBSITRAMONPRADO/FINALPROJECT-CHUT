@@ -1,5 +1,4 @@
 <div class="menu-container">
-
     <aside class="sidebar">
       <div class="sidebar-logo">
         <img src="chutchut.jpg" alt="Chut Chut" class="sidebar-logo-img" />
@@ -23,6 +22,7 @@
         @for (item of filteredItems(); track item._id) {
           <app-menu-item-card
             [item]="item"
+            [price]="priceForBranch(item, branch)"
             (addToCart)="handleAddToCart($event)">
           </app-menu-item-card>
         }
