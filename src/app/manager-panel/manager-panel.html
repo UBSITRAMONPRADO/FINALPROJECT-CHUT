@@ -507,21 +507,6 @@
                   }
                 </div>
               </div>
-             
-              <div class="branch-pricing-list">
-                @for (bp of newItem().branchPricing; track bp.branch) {
-                  <div class="branch-pricing-row">
-                    <span class="branch-avail-toggle">{{ bp.branch }}</span>
-                    <div class="branch-price-input-wrap">
-                      <span>₱</span>
-                      <input type="number" class="form-input" [value]="bp.price"
-                        (input)="updateBranchPrice(bp.branch, +$any($event.target).value)"
-                        placeholder="0" />
-                    </div>
-                  </div>
-                }
-              </div>
-
                 <div class="form-group">
                   <label>Category</label>
                   <select class="form-input" [value]="newItem().category"
@@ -531,6 +516,8 @@
                     <option value="Wings & Fries">Wings & Fries</option>
                     <option value="Wings & Gravy">Wings & Gravy</option>
                     <option value="Wings & Drinks">Wings & Drinks</option>
+                    <option value="Bilo Bilo & Mais">Bilo Bilo & Mais</option>
+                    <option value="Coat">Coat</option>
                     <option value="Combos">Combos</option>
                     <option value="Fries">Fries</option>
                     <option value="Corndog">Corndog</option>
