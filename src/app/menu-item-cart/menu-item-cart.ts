@@ -9,6 +9,7 @@ import { MenuItem } from '../cart-services';
 })
 export class MenuItemCardComponent {
   @Input() item!: MenuItem;
+  @Input() price!: number;
   @Output() addToCart = new EventEmitter<MenuItem>();
 
   onAdd(): void {
