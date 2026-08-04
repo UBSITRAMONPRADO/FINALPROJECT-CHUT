@@ -1,965 +1,972 @@
-const dns = require('dns');
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+    import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
+    import { CommonModule } from '@angular/common';
+    import { Router } from '@angular/router';
+    import {CartServices, MenuItem, Staff, OrderHistoryDay, SelectedOption, VariantGroup, BranchPricing, optionsKey,
+            priceForBranch } from '../cart-services';
 
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const mongoSanitize = require('express-mongo-sanitize');
+    type HistoryView = 'daily' | 'weekly' | 'monthly' | 'yearly';
+    type BestSellerView = 'alltime' | 'yearly' | 'monthly' | 'weekly' | 'custom';
 
-const app = express();
+    @Component({
+      selector: 'app-manager-panel',
+      imports: [CommonModule],
+      templateUrl: './manager-panel.html',
+      styleUrl: './manager-panel.css'
+    })
+    export class ManagerPanelComponent implements OnDestroy {
+      router      = inject(Router);
+      cartService = inject(CartServices);
 
-// ── TRUST RENDER'S PROXY ──
-// Render sits in front of your app behind a reverse proxy, so without this
-// every request looks like it comes from the same internal IP — which
-// breaks IP-based rate limiting below (everyone would share one bucket).
-app.set('trust proxy', 1);
+      activeTab  = signal<string>('dashboard');
+      successMsg = signal('');
+      errorMsg   = signal('');
+      imageUploading = signal(false);
+      allTransactionModes = ['Dine In', 'Take Out', 'Grab'];
+      allPaymentModes     = ['Cash', 'Gcash/Maya'];
+      
+      branches = ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'];
+      expandedBranch = signal<string | null>(this.branches[0]); // first branch open by default
 
-// ── SECURITY HEADERS ──
-app.use(helmet());
-
-// ── CORS — locked down to known frontend origins only ──
-// Add every domain your Angular app is actually served from (production +
-// local dev). Anything not in this list is blocked from calling the API
-// directly from a browser.
-const allowedOrigins = [
-  'http://localhost:4200','https://chutchut-project-hazel.vercel.app/',               // local Angular dev server
-  process.env.FRONTEND_URL                 // set this in your .env / Render env vars,
-                                  
-].filter(Boolean);
-
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (e.g. curl, Postman, server-to-server)
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  credentials: true
-}));
-
-app.use(express.json());
-
-// ── STRIP MONGO OPERATORS FROM USER INPUT ──
-// Blocks NoSQL-injection payloads like { "password": { "$ne": null } }
-// from reaching Mongoose queries.
-app.use(mongoSanitize());
-
-// ── RATE LIMITING ──
-// General ceiling across the whole API.
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300,                 // 300 requests per IP per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' }
-});
-app.use(generalLimiter);
-
-// Tighter limit just for login attempts — slows down password guessing
-// without affecting normal POS/menu/dashboard traffic.
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,                  // 10 attempts per IP per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many login attempts. Please wait 15 minutes and try again.' }
-});
-
-// ── ADMIN GATE FOR ONE-OFF MIGRATION / SEED ROUTES ──
-// These routes are meant to be run once, by you, not left open to the
-// internet. Set ADMIN_KEY in your .env / Render env vars, then call these
-// routes with a header: x-admin-key: <your key>
-function requireAdminKey(req, res, next) {
-  const key = req.header('x-admin-key');
-  if (!process.env.ADMIN_KEY || key !== process.env.ADMIN_KEY) {
-    return res.status(403).send({ error: 'Forbidden — missing or invalid admin key.' });
-  }
-  next();
-}
-
-// ── IMAGE UPLOADS ──
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-
-// Serves uploaded images statically at http://localhost:3000/uploads/<filename>
-app.use('/uploads', express.static(uploadsDir));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '-');
-    cb(null, `${base}-${Date.now()}${ext}`); // unique name, avoids overwriting
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB cap
-  fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp/;
-    const extOk  = allowed.test(path.extname(file.originalname).toLowerCase());
-    const mimeOk = allowed.test(file.mimetype);
-    if (extOk && mimeOk) return cb(null, true);
-    cb(new Error('Only image files (jpg, png, gif, webp) are allowed'));
-  }
-});
-
-// ── CONNECT TO MONGODB ──
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
-
-const MenuItemSchema = new mongoose.Schema({
-  name:        { type: String, required: true },
-  price:       { type: Number, required: true },
-  category:    { type: String, required: true },
-  description: { type: String, default: '' },
-  image:       { type: String, default: '' },
-
-  // Variant groups for this item — e.g. Sauce, Spice Level, Extras.
-  // Empty array = no picker shown, item adds to cart instantly.
-  // 'single' groups are radio-style (exactly one choice, can be required);
-  // 'multi' groups are checkbox-style (zero or more choices) and are how
-  // priced add-ons like "Extra Fries +₱35" work.
-  variantGroups: {
-    type: [{
-      name:     { type: String, required: true },       // "Sauce", "Spice Level", "Extras"
-      type:     { type: String, enum: ['single', 'multi'], default: 'single' },
-      required: { type: Boolean, default: false },
-      options: [{
-        label:      { type: String, required: true },
-        priceDelta: { type: Number, default: 0 }         // added to unit price when selected
-      }]
-    }],
-    default: []
-  }
-});
-const MenuItem = mongoose.model('MenuItem', MenuItemSchema);
-
-const StaffSchema = new mongoose.Schema({
-  staffCode: { type: String, required: true, unique: true },
-  name:      { type: String, required: true },
-  branch:    { type: String, enum: ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'], default: 'Harrison Bazaar' },
-  password:  { type: String, required: true },
-  contact:   { type: String, default: '' },
-  status:    { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
-  dateAdded: { type: String, default: () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }) }
-});
-const Staff = mongoose.model('Staff', StaffSchema);
-
-// Orders are NEVER deleted on reset — only today's orders are cleared.
-// All past orders stay in DB so Sales History can be computed anytime.
-const OrderSchema = new mongoose.Schema({
-  items: [
-    {
-      item: {
-        _id:         mongoose.Schema.Types.ObjectId,
-        name:        String,
-        price:       Number,
-        category:    String,
-        description: String,
-        image:       String
-      },
-      quantity: Number,
-
-      // The chosen option(s) across all of this item's variant groups —
-      // e.g. [{groupName:'Sauce',label:'Honey Butter',priceDelta:0},
-      //       {groupName:'Extras',label:'Extra Fries',priceDelta:35}].
-      // Empty array for items with no variant groups.
-      selectedOptions: [{
-        groupName:  String,
-        label:      String,
-        priceDelta: Number
-      }]
-    }
-  ],
-  total:           { type: Number, required: true },
-  transactionMode: { type: String, default: '' },
-  paymentMode:     { type: String, default: '' },
-  timestamp:       { type: Date, default: Date.now },
-
-  // ── Order status — cancelled orders are kept in DB for records but
-  // excluded from all sales totals (dailysales, history, live views) ──
-  status:          { type: String, enum: ['completed', 'cancelled'], default: 'completed' },
-
-  // ── Branch / employee attribution ──
-  branch:          { type: String, enum: ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'], default: 'Harrison Bazaar' },
-  staffName:       { type: String, default: 'Unknown' },
-  staffId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Staff', default: null },
-
-  // ── Per-branch sequential order numbering (e.g. #HB001) ──
-  branchOrderNumber: { type: Number },
-  displayId:         { type: String }
-});
-const Order = mongoose.model('Order', OrderSchema);
-
-const KioskSettingsSchema = new mongoose.Schema({
-  kioskName:        { type: String, default: 'Chut Chut' },
-  transactionModes: { type: [String], default: ['Dine In', 'Take Out', 'Grab'] },
-  paymentModes:     { type: [String], default: ['Cash', 'Gcash/maya'] },
-  managerPassword:  { type: String, default: 'manager@2026' }
-});
-const KioskSettings = mongoose.model('KioskSettings', KioskSettingsSchema);
-
-
-//  DAILY SALES — persisted per-day summary
-const DailySalesSchema = new mongoose.Schema({
-  date:         { type: String, required: true, unique: true }, // "YYYY-MM-DD" (Asia/Manila)
-  totalSales:   { type: Number, default: 0 },
-  totalOrders:  { type: Number, default: 0 },
-  transactions: {
-    dineIn:  { type: Number, default: 0 },
-    takeOut: { type: Number, default: 0 },
-    grab:    { type: Number, default: 0 }
-  },
-  payments: {
-    cash:   { type: Number, default: 0 },
-    online: { type: Number, default: 0 },
-    grab:   { type: Number, default: 0 }
-  },
-  topItems: [
-    {
-      name:  String,
-      qty:   Number,
-      total: Number
-    }
-  ],
-  updatedAt: { type: Date, default: Date.now }
-});
-const DailySales = mongoose.model('DailySales', DailySalesSchema);
-
-// ── Per-branch order number counter (atomic increments) ──
-const CounterSchema = new mongoose.Schema({
-  key: { type: String, required: true, unique: true }, // branch name
-  seq: { type: Number, default: 0 }
-});
-const Counter = mongoose.model('Counter', CounterSchema);
-
-const branchCodes = {
-  'Harrison Bazaar': 'HB',
-  'Pines Arcade':    'PA',
-  'Porta Vaga':      'PV'
-};
-
-async function getNextBranchOrderNumber(branch) {
-  const counter = await Counter.findOneAndUpdate(
-    { key: branch },
-    { $inc: { seq: 1 } },
-    { upsert: true, new: true }
-  );
-  return counter.seq;
-}
-
-function formatDisplayId(branch, seq) {
-  const code = branchCodes[branch] || 'XX';
-  return `#${code}${String(seq).padStart(3, '0')}`;
-}
-
-// Returns the UTC start/end instants that correspond to midnight-to-midnight
-function getManilaDayBounds(refDate = new Date()) {
-  const dateStr = refDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); // "YYYY-MM-DD"
-  const start = new Date(`${dateStr}T00:00:00+08:00`);
-  const end   = new Date(`${dateStr}T23:59:59.999+08:00`);
-  return { dateStr, start, end };
-}
-
-// Recomputes one day's summary straight from the Orders collection.
-// Cancelled orders are excluded from every total below.
-async function upsertDailySales(refDate = new Date()) {
-  const { dateStr, start, end } = getManilaDayBounds(refDate);
-  const allOrders = await Order.find({ timestamp: { $gte: start, $lte: end } });
-  const orders = allOrders.filter(o => o.status !== 'cancelled'); // NEW — exclude cancelled
-
-  const summary = {
-    date:         dateStr,
-    totalSales:   0,
-    totalOrders:  orders.length,
-    transactions: { dineIn: 0, takeOut: 0, grab: 0 },
-    payments:     { cash: 0, online: 0, grab: 0 },
-    topItems:     [],
-    updatedAt:    new Date()
-  };
-
-  const itemMap = new Map();
-
-  orders.forEach(order => {
-    summary.totalSales += order.total;
-
-    if (order.transactionMode === 'Dine In')  summary.transactions.dineIn++;
-    if (order.transactionMode === 'Take Out') summary.transactions.takeOut++;
-    if (order.transactionMode === 'Grab')     summary.transactions.grab++;
-
-    if (order.paymentMode === 'Cash')           summary.payments.cash++;
-    if (order.paymentMode === 'Online Payment') summary.payments.online++;
-    if (order.paymentMode === 'Grab')           summary.payments.grab++;
-
-    order.items.forEach(entry => {
-      const key = entry.item.name;
-      if (itemMap.has(key)) {
-        itemMap.get(key).qty   += entry.quantity;
-        itemMap.get(key).total += entry.item.price * entry.quantity;
-      } else {
-        itemMap.set(key, {
-          name:  key,
-          qty:   entry.quantity,
-          total: entry.item.price * entry.quantity
-        });
+      getBranchPrice(branch: string): number {
+      return (this.newItem().branchPricing ?? []).find(bp => bp.branch === branch)?.price ?? 0;
       }
-    });
-  });
 
-  summary.topItems = Array.from(itemMap.values())
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10);
-
-  return DailySales.findOneAndUpdate(
-    { date: dateStr },
-    summary,
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
-}
-
-// Groups raw orders by Manila date. Cancelled orders are still pushed into
-// day.orders (so the frontend can list/display them), but are excluded from
-// every sum: totalSales, totalOrders, transactions, payments, topItems.
-function groupOrdersByDate(orders) {
-  const map = new Map();
-
-  orders.forEach(order => {
-    const date = new Date(order.timestamp)
-      .toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); 
-
-    if (!map.has(date)) {
-      map.set(date, {
-        date,
-        totalSales:   0,
-        totalOrders:  0,
-        transactions: { dineIn: 0, takeOut: 0, grab: 0 },
-        payments:     { cash: 0, online: 0, grab: 0 },
-        itemMap:      new Map(),
-        orders:       []
-      });
-    }
-
-    const day = map.get(date);
-    day.orders.push(order); // always keep the order visible in the day's list
-
-    if (order.status === 'cancelled') return; // NEW — skip all sums for cancelled orders
-
-    day.totalSales  += order.total;
-    day.totalOrders += 1;
-
-    if (order.transactionMode === 'Dine In')  day.transactions.dineIn++;
-    if (order.transactionMode === 'Take Out') day.transactions.takeOut++;
-    if (order.transactionMode === 'Grab')     day.transactions.grab++;
-
-    if (order.paymentMode === 'Cash')           day.payments.cash++;
-    if (order.paymentMode === 'Online Payment') day.payments.online++;
-    if (order.paymentMode === 'Grab')           day.payments.grab++;
-
-    order.items.forEach(entry => {
-      const key = entry.item.name;
-      if (day.itemMap.has(key)) {
-        day.itemMap.get(key).qty   += entry.quantity;
-        day.itemMap.get(key).total += entry.item.price * entry.quantity;
-      } else {
-        day.itemMap.set(key, {
-          name:  key,
-          qty:   entry.quantity,
-          total: entry.item.price * entry.quantity
-        });
+      toggleBranch(branch: string): void {
+        this.expandedBranch.set(this.expandedBranch() === branch ? null : branch);
       }
-    });
-  });
 
-  return Array.from(map.values())
-    .map(day => ({
-      date:         day.date,
-      totalSales:   day.totalSales,
-      totalOrders:  day.totalOrders,
-      transactions: day.transactions,
-      payments:     day.payments,
-      topItems:     Array.from(day.itemMap.values())
-                        .sort((a, b) => b.qty - a.qty)
-                        .slice(0, 10),
-      orders:       day.orders
-    }))
-    .sort((a, b) => b.date.localeCompare(a.date));
-}
+      transactionsByBranch = computed(() => {
+        const days = [...this.cartService.salesHistory()].sort((a, b) => b.date.localeCompare(a.date));
+        const flat: Array<{ date: string; order: any }> = [];
+        for (const d of days) {
+          for (const order of d.orders) flat.push({ date: d.date, order });
+        }
 
-async function getMergedDailyHistory(orders) {
-  const liveHistory = groupOrdersByDate(orders);
-  const liveDates   = new Set(liveHistory.map(d => d.date));
-
-  const archivedDays = await DailySales.find({ date: { $nin: [...liveDates] } });
-  const archivedHistory = archivedDays.map(day => ({
-    date:         day.date,
-    totalSales:   day.totalSales,
-    totalOrders:  day.totalOrders,
-    transactions: day.transactions,
-    payments:     day.payments,
-    topItems:     day.topItems,
-    orders:       [] // raw orders were cleared by a reset — only the summary survives
-  }));
-
-  return [...liveHistory, ...archivedHistory].sort((a, b) => b.date.localeCompare(a.date));
-}
-
-
-//  LOGIN ENDPOINTS
-app.post('/api/login/manager', loginLimiter, async (req, res) => {
-  const { password } = req.body;
-  let settings = await KioskSettings.findOne();
-  if (!settings) { settings = new KioskSettings(); await settings.save(); }
-  if (password === settings.managerPassword) {
-    return res.send({ success: true, role: 'Manager' });
-  }
-  res.status(401).send({ success: false, message: 'Incorrect manager password' });
-});
-
-app.post('/api/login/staff', loginLimiter, async (req, res) => {
-  const { staffCode, password } = req.body;
-  const staff = await Staff.findOne({ staffCode });
-  if (!staff) return res.status(401).send({ success: false, message: 'Staff code not found' });
-  if (staff.status === 'Inactive') return res.status(403).send({ success: false, message: 'This account is inactive' });
-  if (staff.password !== password) return res.status(401).send({ success: false, message: 'Incorrect password' });
-  res.send({ success: true, role: 'Employee', staff });
-});
-
-
-//  MENU ITEM ENDPOINTS
-app.get('/api/menu', async (req, res) => {
-  res.send(await MenuItem.find());
-});
-
-app.post('/api/menu', async (req, res) => {
-  const item = new MenuItem(req.body);
-  await item.save();
-  console.log('Added menu item:', item.name);
-  res.status(201).send(item);
-});
-
-app.put('/api/menu/:id', async (req, res) => {
-  const item = await MenuItem.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  if (!item) return res.status(404).send({ error: 'Item not found' });
-  res.send(item);
-});
-
-app.delete('/api/menu/:id', async (req, res) => {
-  const item = await MenuItem.findByIdAndDelete(req.params.id);
-  if (!item) return res.status(404).send({ error: 'Item not found' });
-  res.send({ message: 'Item deleted' });
-});
-
-
-//  STAFF ENDPOINTS
-app.get('/api/staff', async (req, res) => {
-  res.send(await Staff.find());
-});
-
-app.post('/api/staff', async (req, res) => {
-  const member = new Staff(req.body);
-  await member.save();
-  console.log('Added staff:', member.name);
-  res.status(201).send(member);
-});
-
-app.put('/api/staff/:id', async (req, res) => {
-  const member = await Staff.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  if (!member) return res.status(404).send({ error: 'Staff not found' });
-  res.send(member);
-});
-
-// DELETE — permanently wipes ALL staff accounts across every branch.
-// Must be declared BEFORE '/api/staff/:id' or Express matches "all" as an :id.
-app.delete('/api/staff/all', async (req, res) => {
-  try {
-    const result = await Staff.deleteMany({});
-    console.log(`Cleared ALL staff: ${result.deletedCount} deleted`);
-    res.send({ message: `Cleared ${result.deletedCount} staff members` });
-  } catch (err) {
-    console.error('Failed to clear all staff:', err);
-    res.status(500).send({ error: 'Failed to clear all staff' });
-  }
-});
-
-app.delete('/api/staff/:id', async (req, res) => {
-  const member = await Staff.findByIdAndDelete(req.params.id);
-  if (!member) return res.status(404).send({ error: 'Staff not found' });
-  res.send({ message: 'Staff deleted' });
-});
-
-// ══════════════════════════════════════════
-//  ORDER ENDPOINTS
-// ══════════════════════════════════════════
-
-// GET today's orders — used by both dashboard and manager live view.
-// Optional ?branch= filter, used by the Employee Dashboard so staff
-// only ever see their own assigned branch's orders.
-app.get('/api/orders/today', async (req, res) => {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const filter = { timestamp: { $gte: startOfDay } };
-  if (req.query.branch) filter.branch = req.query.branch;
-  const orders = await Order.find(filter).sort({ timestamp: -1 });
-  res.send(orders);
-});
-
-// GET all orders grouped by date — used by Sales History tab
-// Returns one entry per day with totals, breakdowns, top items, and raw orders.
-// Days whose orders were wiped by a reset are filled in from `dailysales`.
-app.get('/api/orders/history', async (req, res) => {
-  const orders = await Order.find().sort({ timestamp: 1 });
-  res.send(await getMergedDailyHistory(orders));
-});
-
-// POST a new order — assigns a per-branch sequential display ID
-// (e.g. #HB001, #PA001, #PV001) in addition to the Mongo _id.
-app.post('/api/orders', async (req, res) => {
-  const branch = req.body.branch || 'Harrison Bazaar';
-  const seq = await getNextBranchOrderNumber(branch);
-
-  const order = new Order({
-    ...req.body,
-    branchOrderNumber: seq,
-    displayId: formatDisplayId(branch, seq)
-  });
-  await order.save();
-  console.log(`New order ${order.displayId} — ₱${order.total}`);
-
-  // Keep today's row in `dailysales` in sync with the new order
-  try {
-    await upsertDailySales(order.timestamp);
-  } catch (err) {
-    console.error('Failed to upsert dailysales:', err);
-  }
-
-  res.status(201).send(order);
-});
-
-// PATCH — cancel an order (soft-cancel, order stays in DB for records
-// but is excluded from every sales total from this point on)
-app.patch('/api/orders/:id/cancel', async (req, res) => {
-  const order = await Order.findByIdAndUpdate(
-    req.params.id,
-    { status: 'cancelled' },
-    { new: true }
-  );
-  if (!order) return res.status(404).send({ error: 'Order not found' });
-
-  // Recompute today's dailysales row so totals reflect the cancellation
-  try {
-    await upsertDailySales(order.timestamp);
-  } catch (err) {
-    console.error('Failed to upsert dailysales after cancel:', err);
-  }
-
-  console.log(`Order ${order.displayId || order._id} cancelled`);
-  res.send(order);
-});
-
-// PATCH — restore a cancelled order back to completed
-app.patch('/api/orders/:id/uncancel', async (req, res) => {
-  const order = await Order.findByIdAndUpdate(
-    req.params.id,
-    { status: 'completed' },
-    { new: true }
-  );
-  if (!order) return res.status(404).send({ error: 'Order not found' });
-
-  try {
-    await upsertDailySales(order.timestamp);
-  } catch (err) {
-    console.error('Failed to upsert dailysales after uncancel:', err);
-  }
-
-  console.log(`Order ${order.displayId || order._id} restored`);
-  res.send(order);
-});
-
-// DELETE — permanently wipes ALL orders + all archived daily summaries,
-// across every branch. Unlike /reset (today only), this has no undo.
-app.delete('/api/orders/all', async (req, res) => {
-  try {
-    const result = await Order.deleteMany({});
-    await DailySales.deleteMany({});
-    console.log(`Cleared ALL orders: ${result.deletedCount} deleted, plus all daily summaries`);
-    res.send({ message: `Cleared ${result.deletedCount} orders and all sales history` });
-  } catch (err) {
-    console.error('Failed to clear all orders:', err);
-    res.status(500).send({ error: 'Failed to clear all orders' });
-  }
-});
-
-// DELETE reset — clears TODAY's orders only.
-// Past days are kept in DB so history is never lost.
-app.delete('/api/orders/reset', async (req, res) => {
-  // Finalize today's numbers into dailysales BEFORE wiping the orders,
-  // so the archived summary survives the reset.
-  try {
-    await upsertDailySales();
-  } catch (err) {
-    console.error('Failed to finalize dailysales before reset:', err);
-  }
-
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const result = await Order.deleteMany({ timestamp: { $gte: startOfDay } });
-  console.log(`Reset: cleared ${result.deletedCount} orders from today`);
-  res.send({ message: `Cleared ${result.deletedCount} orders from today` });
-});
-
-// ══════════════════════════════════════════
-//  ONE-TIME MIGRATION — backfill displayId for existing orders
-//  that were created before branch order numbering existed.
-//  GATED behind ADMIN_KEY — see requireAdminKey() above. Call with header
-//  x-admin-key: <your ADMIN_KEY>. Remove this route entirely once you've
-//  run it and confirmed the response.
-// ══════════════════════════════════════════
-app.post('/api/migrate/branch-order-numbers', requireAdminKey, async (req, res) => {
-  const branches = Object.keys(branchCodes);
-  let updatedCount = 0;
-
-  for (const branch of branches) {
-    const orders = await Order.find({ branch, displayId: { $exists: false } }).sort({ timestamp: 1 });
-    for (const order of orders) {
-      const seq = await getNextBranchOrderNumber(branch);
-      order.branchOrderNumber = seq;
-      order.displayId = formatDisplayId(branch, seq);
-      await order.save();
-      updatedCount++;
-    }
-  }
-
-  res.send({ message: `Backfilled ${updatedCount} orders with branch order numbers.` });
-});
-
-// ══════════════════════════════════════════
-//  ONE-TIME MIGRATION — applies full variant groups (Sauce/Flavor, Spice
-//  Level, Extras) to every menu category, and consolidates the 3 separate
-//  Giant Twirl items into one item with a Flavor group.
-//  GATED behind ADMIN_KEY. Call with header x-admin-key: <your ADMIN_KEY>.
-//  Remove this route entirely once you've run it and confirmed the response.
-// ══════════════════════════════════════════
-app.post('/api/migrate/add-variant-groups', requireAdminKey, async (req, res) => {
-  const opt = (label, priceDelta = 0) => ({ label, priceDelta });
-
-  // Chicken items — Wings & Rice/Fries/Gravy/Drinks, Combos
-  const chickenGroups = [
-    {
-      name: 'Sauce', type: 'single', required: true,
-      options: [opt('Honey Butter'), opt('Lemon Glaze'), opt('Yamyeong'), opt('Cheese')]
-    },
-    {
-      name: 'Spice Level', type: 'single', required: true,
-      options: [opt('Mild'), opt('Medium'), opt('Hot')]
-    },
-    {
-      name: 'Extras', type: 'multi', required: false,
-      options: [opt('Extra Rice', 25), opt('Extra Fries', 35), opt('Extra Sauce', 15)]
-    }
-  ];
-  const chickenCategories = ['Wings & Rice', 'Wings & Fries', 'Wings & Gravy', 'Wings & Drinks', 'Combos'];
-
-  // Fries
-  const friesGroups = [
-    {
-      name: 'Flavor', type: 'single', required: true,
-      options: [opt('Cheese'), opt('Sour Cream'), opt('BBQ')]
-    },
-    {
-      name: 'Extras', type: 'multi', required: false,
-      options: [opt('Extra Dip', 15)]
-    }
-  ];
-
-  // Corndog
-  const corndogGroups = [
-    {
-      name: 'Extras', type: 'multi', required: false,
-      options: [opt('Extra Cheese Dip', 15)]
-    }
-  ];
-
-  // Chillers (sundaes/floats/macchiatos are already flavor-specific by
-  // name, so they just get a lightweight Extras group; Giant Twirl gets
-  // its own dedicated Flavor group, set separately below)
-  const chillersGroups = [
-    {
-      name: 'Extras', type: 'multi', required: false,
-      options: [opt('Extra Toppings', 10)]
-    }
-  ];
-
-  const chickenResult  = await MenuItem.updateMany({ category: { $in: chickenCategories } }, { $set: { variantGroups: chickenGroups } });
-  const friesResult    = await MenuItem.updateMany({ category: 'Fries' },    { $set: { variantGroups: friesGroups } });
-  const corndogResult  = await MenuItem.updateMany({ category: 'Corndog' },  { $set: { variantGroups: corndogGroups } });
-  const chillersResult = await MenuItem.updateMany(
-    { category: 'Chillers', name: { $not: { $regex: '^Giant Twirl' } } },
-    { $set: { variantGroups: chillersGroups } }
-  );
-
-  // Consolidate the 3 Giant Twirl items into one item with a Flavor group
-  const giantTwirls = await MenuItem.find({ name: { $regex: '^Giant Twirl' } }).sort({ name: 1 });
-  let giantTwirlResult = 'No Giant Twirl items found';
-  if (giantTwirls.length > 0) {
-    const keeper = giantTwirls[0];
-    keeper.name = 'Giant Twirl';
-    keeper.description = 'Soft serve cone — Chocolate, Vanilla, or Mix';
-    keeper.variantGroups = [
-      { name: 'Flavor', type: 'single', required: true, options: [opt('Chocolate'), opt('Vanilla'), opt('Mix')] }
-    ];
-    await keeper.save();
-
-    const toRemove = giantTwirls.slice(1).map(d => d._id);
-    if (toRemove.length > 0) {
-      await MenuItem.deleteMany({ _id: { $in: toRemove } });
-    }
-    giantTwirlResult = `Consolidated ${giantTwirls.length} Giant Twirl item(s) into one`;
-  }
-
-  res.send({
-    message: 'Variant group migration complete',
-    chickenItemsUpdated:  chickenResult.modifiedCount,
-    friesItemsUpdated:    friesResult.modifiedCount,
-    corndogItemsUpdated:  corndogResult.modifiedCount,
-    chillersItemsUpdated: chillersResult.modifiedCount,
-    giantTwirl: giantTwirlResult
-  });
-});
-
-// ══════════════════════════════════════════
-//  DAILY SALES ENDPOINTS
-// ══════════════════════════════════════════
-
-// GET all persisted daily summaries, newest first
-app.get('/api/dailysales', async (req, res) => {
-  const rows = await DailySales.find().sort({ date: -1 });
-  res.send(rows);
-});
-
-// GET a single day's persisted summary
-app.get('/api/dailysales/:date', async (req, res) => {
-  const row = await DailySales.findOne({ date: req.params.date });
-  if (!row) return res.status(404).send({ error: 'No summary for that date' });
-  res.send(row);
-});
-
-// ══════════════════════════════════════════
-//  KIOSK SETTINGS ENDPOINTS
-// ══════════════════════════════════════════
-
-app.get('/api/settings', async (req, res) => {
-  let settings = await KioskSettings.findOne();
-  if (!settings) { settings = new KioskSettings(); await settings.save(); }
-  res.send(settings);
-});
-
-app.put('/api/settings', async (req, res) => {
-  let settings = await KioskSettings.findOne();
-  if (!settings) {
-    settings = new KioskSettings(req.body);
-  } else {
-    Object.assign(settings, req.body);
-  }
-  await settings.save();
-  console.log('Settings updated');
-  res.send(settings);
-});
-
-// ══════════════════════════════════════════
-//  BACKUP EXPORT ENDPOINT
-// ══════════════════════════════════════════
-
-// GET /api/backup
-// Returns ALL system data in one payload.
-// Angular uses SheetJS to convert this into a multi-sheet Excel file client-side.
-// Sheets: Orders (flat rows), Daily Summary, Menu Items, Staff
-
-app.get('/api/backup', async (req, res) => {
-  const [orders, menu, staff] = await Promise.all([
-    Order.find().sort({ timestamp: 1 }),
-    MenuItem.find(),
-    Staff.find()
-  ]);
-
-  // Sheet 1 — Orders: one row per item line within each order
-  // (only covers whatever orders currently still exist — reset days
-  // have no raw order rows left, same as in Sales History)
-  const orderRows = [];
-  orders.forEach(order => {
-    const date = new Date(order.timestamp)
-      .toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-    const time = new Date(order.timestamp)
-      .toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour12: true });
-    order.items.forEach(entry => {
-      orderRows.push({
-        'Date':             date,
-        'Time':             time,
-        'Order ID':         order.displayId || order._id.toString(),
-        'Branch':           order.branch,
-        'Employee':         order.staffName,
-        'Item Name':        entry.item.name,
-        'Options':          (entry.selectedOptions || []).map(o => `${o.groupName}: ${o.label}${o.priceDelta ? ' (+₱' + o.priceDelta + ')' : ''}`).join(', '),
-        'Category':         entry.item.category,
-        'Unit Price':       entry.item.price,
-        'Quantity':         entry.quantity,
-        'Subtotal':         entry.item.price * entry.quantity,
-        'Order Total':      order.total,
-        'Transaction Mode': order.transactionMode,
-        'Payment Mode':     order.paymentMode,
-        'Status':           order.status || 'completed'
+        return this.branches.map(branch => {
+          const entries = flat.filter(e => (e.order.branch ?? 'Unknown') === branch);
+          return {
+            branch,
+            entries,
+            totalOrders: entries.length,
+            totalSales: entries.reduce((sum, e) => sum + e.order.total, 0)
+          };
+        });
       });
+      // ── PASSWORD MANAGEMENT ──
+      newManagerPassword = signal('');
+
+      // ── MENU MANAGEMENT ──
+      showMenuForm  = signal(false);
+      editingItem   = signal<MenuItem | null>(null);
+    newItem       = signal<Partial<MenuItem>>({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: this.defaultBranchPricing() });
+
+    //— branch sub-tabs ──
+    activeMenuBranch = signal<string>(this.branches[0]);
+
+    setMenuBranch(branch: string): void {
+      this.activeMenuBranch.set(branch);
+    }
+
+    menuItemsForActiveBranch = computed(() => this.cartService.menuItems());
+
+    private defaultBranchPricing(): BranchPricing[] {
+      return this.branches.map(branch => ({ branch, price: 0 }));
+    }
+      // ── STAFF MANAGEMENT ──
+      showStaffForm  = signal(false);
+      editingStaff   = signal<Staff | null>(null);
+      newStaff       = signal<Partial<Staff>>({ staffCode: '', name: '', branch: 'Harrison Bazaar', password: '' });
+
+      // ── SALES HISTORY — which day is expanded (legacy, kept for compatibility) ──
+      expandedDate = signal<string | null>(null);
+
+      // ── SALES HISTORY — grouping view (daily/weekly/monthly/yearly) ──
+      historyView   = signal<HistoryView>('daily');
+      expandedGroup = signal<string | null>(null);
+
+      // ── BEST SELLER — which period is selected on the Best Seller tab ──
+      bestSellerView = signal<BestSellerView>('alltime');
+
+      setBestSellerView(view: BestSellerView): void {
+        this.bestSellerView.set(view);
+      }
+
+      // ── BEST SELLER — custom date range (used only when bestSellerView === 'custom') ──
+      customStartDate = signal<string>('');
+      customEndDate   = signal<string>('');
+
+      setCustomStartDate(date: string): void {
+        this.customStartDate.set(date);
+      }
+
+      setCustomEndDate(date: string): void {
+        this.customEndDate.set(date);
+      }
+
+      // ── CATEGORY COLOR CODING (matches the Employee Dashboard POS redesign) ──
+      categoryColor(cat: string): string {
+        if (cat.includes('Wings'))    return '#CC0000';
+        if (cat.includes('Fries'))    return '#FFC200';
+        if (cat.includes('Corndog'))  return '#E8792F';
+        if (cat.includes('Chillers')) return '#2E9BCC';
+        if (cat.includes('Combos'))   return '#7C3AED';
+        return '#1A1A1A'; // "All" / unmatched
+      }
+
+      lightBg(cat: string): string {
+        return `${this.categoryColor(cat)}14`;
+      }
+
+      optionsKey = optionsKey; // exposed for the template's @for track expressions
+      priceForBranch = priceForBranch;
+
+
+      // Formats a cart line's selected options for display, e.g. "Honey Butter, Hot".
+      formatOptions(options: SelectedOption[]): string {
+        return options.map(o => o.label).join(', ');
+      }
+
+      // ── SALES COMPUTED (today) — cancelled orders excluded from every total ──
+      itemSales = computed(() => {
+      const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
+      const map    = new Map<string, { name: string; qty: number; total: number; image: string }>();
+      orders.forEach(order => {
+        order.items.forEach(entry => {
+          const linePrice = priceForBranch(entry.item, order.branch);
+          const existing = map.get(entry.item.name);
+          if (existing) {
+            existing.qty   += entry.quantity;
+            existing.total += linePrice * entry.quantity;
+          } else {
+            map.set(entry.item.name, {
+              name:  entry.item.name,
+              qty:   entry.quantity,
+              total: linePrice * entry.quantity,
+              image: entry.item.image
+            });
+          }
+        });
+      });
+      return Array.from(map.values()).sort((a, b) => b.qty - a.qty);
     });
-  });
 
-  // Sheet 2 — Daily Summary: one row per day (now includes reset days too)
-  const dailySummaryRows = (await getMergedDailyHistory(orders)).map(day => ({
-    'Date':           day.date,
-    'Total Sales':    day.totalSales,
-    'Total Orders':   day.totalOrders,
-    'Dine In':        day.transactions.dineIn,
-    'Take Out':       day.transactions.takeOut,
-    'Grab':           day.transactions.grab,
-    'Cash':           day.payments.cash,
-    'Online/GCash':   day.payments.online,
-  }));
+      // "Orders Breakdown" list — pending/completed orders only.
+      allOrdersIndexed = computed(() =>
+        this.cartService.completedOrders()
+          .filter(o => o.status !== 'cancelled')
+          .map((order, i) => ({ order, index: i + 1 }))
+      );
 
-  // Sheet 3 — Menu Items
-  const menuRows = menu.map(item => ({
-    'Name':        item.name,
-    'Category':    item.category,
-    'Price':       item.price,
-    'Description': item.description,
-    'Image':       item.image
-  }));
+      // Cancelled orders — shown in their own section, kept for the record
+      // but excluded from every sales figure above.
+      cancelledOrdersIndexed = computed(() =>
+        this.cartService.completedOrders()
+          .filter(o => o.status === 'cancelled')
+          .map((order, i) => ({ order, index: i + 1 }))
+      );
 
-  // Sheet 4 — Staff (password excluded from export)
-  const staffRows = staff.map(s => ({
-    'Staff Code': s.staffCode,
-    'Name':       s.name,
-    'branch':     s.branch,
-  }));
+      transactionBreakdown = computed(() => {
+        const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
+        return {
+          dineIn:  orders.filter(o => o.transactionMode === 'Dine In').length,
+          takeOut: orders.filter(o => o.transactionMode === 'Take Out').length,
+          grab:    orders.filter(o => o.transactionMode === 'Grab').length
+        };
+      });
 
-  res.send({ orderRows, dailySummaryRows, menuRows, staffRows });
-  console.log('Full backup exported');
-});
+      paymentBreakdown = computed(() => {
+        const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
+        return {
+          cash:   orders.filter(o => o.paymentMode === 'Cash').length,
+          gcashmaya: orders.filter(o => o.paymentMode === 'Gcash/Maya' || o.paymentMode === 'Online Payment').length,
+        };
+      });
+
+      // ── CANCEL / UNCANCEL — backend-persisted via order.status ──
+      cancelOrder(orderId: string): void {
+        this.cartService.cancelOrder(orderId);
+        this.showSuccess('Order cancelled.');
+      }
+
+      uncancelOrder(orderId: string): void {
+        this.cartService.uncancelOrder(orderId);
+        this.showSuccess('Order restored.');
+      }
+
+      // ── GROUPED SALES HISTORY (daily/weekly/monthly/yearly) ──
+      groupedHistory = computed(() => {
+        const days = this.cartService.salesHistory();
+        const view = this.historyView();
+
+        if (view === 'daily') {
+          return days.map(d => ({
+            key: d.date,
+            label: this.formatDayLabel(d.date),
+            totalSales: d.totalSales,
+            totalOrders: d.totalOrders,
+            transactions: d.transactions,
+            payments: d.payments,
+            orders: d.orders,
+            days: [d]
+          }));
+        }
+
+        const groups = new Map<string, any>();
+
+        for (const d of days) {
+          const key = view === 'weekly'  ? this.weekKey(d.date)
+                    : view === 'monthly' ? this.monthKey(d.date)
+                    : this.yearKey(d.date);
+
+          if (!groups.has(key)) {
+            groups.set(key, {
+              key,
+              label: '',
+              totalSales: 0,
+              totalOrders: 0,
+              transactions: { dineIn: 0, takeOut: 0, grab: 0 },
+              payments: { cash: 0, online: 0, grab: 0 },
+              orders: [] as any[],
+              days: [] as OrderHistoryDay[]
+            });
+          }
+          const g = groups.get(key);
+          g.totalSales  += d.totalSales;
+          g.totalOrders += d.totalOrders;
+          g.transactions.dineIn  += d.transactions.dineIn;
+          g.transactions.takeOut += d.transactions.takeOut;
+          g.transactions.grab    += d.transactions.grab;
+          g.payments.cash   += d.payments.cash;
+          g.payments.online += d.payments.online;
+          g.payments.grab   += d.payments.grab;
+          g.orders.push(...d.orders);
+          g.days.push(d);
+        }
+
+        const result = Array.from(groups.values());
+        result.forEach(g => {
+          g.label = view === 'weekly'  ? this.weekLabel(g.days)
+                  : view === 'monthly' ? this.monthLabel(g.key)
+                  : g.key; // yearly: key is already "2026"
+        });
+
+        result.sort((a, b) => b.key.localeCompare(a.key)); // newest first
+        return result;
+      });
+
+      // ── SALES HISTORY OVERVIEW — powers the stat cards, charts, and
+      // transactions table at the top of the Sales History tab. These are
+      // deliberately based on the FULL loaded history (cartService.salesHistory()),
+      // not the daily/weekly/monthly/yearly toggle below, so the summary stays
+      // stable while someone browses through different groupings. Cancelled
+      // orders are already excluded server-side (see server.js groupOrdersByDate),
+      // so no extra filtering is needed here. ──
+
+      historyTotals = computed(() => {
+        const days = this.cartService.salesHistory();
+        return {
+          totalSales:  days.reduce((sum, d) => sum + d.totalSales, 0),
+          totalOrders: days.reduce((sum, d) => sum + d.totalOrders, 0)
+        };
+      });
+
+      historyAvgOrder = computed(() => {
+        const { totalSales, totalOrders } = this.historyTotals();
+        return totalOrders > 0 ? totalSales / totalOrders : 0;
+      });
+
+      // Unique menu items that appear across every order in the loaded history.
+      historyItemsSold = computed(() => {
+        const days = this.cartService.salesHistory();
+        const names = new Set<string>();
+        days.forEach(d => d.orders.forEach(o => o.items.forEach(entry => names.add(entry.item.name))));
+        return names.size;
+      });
+
+      // ── BEST SELLER — date-range filter shared by the ranked list, branch
+      // performance bars, and growth comparison below, so they all agree on
+      // what "this period" means for the selected view. ──
+      private filteredDaysForBestSeller(view: BestSellerView, days: OrderHistoryDay[]): OrderHistoryDay[] {
+        if (view === 'yearly') {
+          const year = String(new Date().getFullYear());
+          return days.filter(d => d.date.startsWith(year));
+        } else if (view === 'monthly') {
+          const monthKey = this.toDateStr(new Date()).slice(0, 7); // "YYYY-MM"
+          return days.filter(d => d.date.startsWith(monthKey));
+        } else if (view === 'weekly') {
+          const currentWeekKey = this.weekKey(this.toDateStr(new Date()));
+          return days.filter(d => this.weekKey(d.date) === currentWeekKey);
+        } else if (view === 'custom') {
+          const start = this.customStartDate();
+          const end = this.customEndDate();
+          return days.filter(d => (!start || d.date >= start) && (!end || d.date <= end));
+        }
+        return days; // 'alltime' — no filter
+      }
+
+      filteredBestSellerDays = computed(() =>
+        this.filteredDaysForBestSeller(this.bestSellerView(), this.cartService.salesHistory())
+      );
+
+      // ── BEST SELLERS — ranked by quantity sold for the selected period
+      // (alltime / yearly / monthly / weekly / custom), with the branches
+      // each item sold at. Cancelled orders are already excluded server-side,
+      // so no extra filtering is needed here. ──
+      bestSellers = computed(() => {
+        const days = this.filteredBestSellerDays();
+        const tally = new Map<string, { name: string; qty: number; branches: Set<string> }>();
+
+        days.forEach(d => {
+          d.orders.forEach(order => {
+            order.items.forEach((entry: any) => {
+              const key = entry.item.name;
+              const row = tally.get(key) ?? { name: entry.item.name, qty: 0, branches: new Set<string>() };
+              row.qty += entry.quantity;
+              row.branches.add(order.branch ?? 'Unknown');
+              tally.set(key, row);
+            });
+          });
+        });
+
+        return Array.from(tally.values())
+          .map(r => ({ name: r.name, qty: r.qty, branches: Array.from(r.branches) }))
+          .sort((a, b) => b.qty - a.qty);
+      });
+
+      // Total units sold across all items in the selected period.
+      bestSellerTotalQty = computed(() => this.bestSellers().reduce((sum, i) => sum + i.qty, 0));
+
+      // Units sold per branch in the selected period (any item, not just the top seller).
+      bestSellerBranchTally = computed(() => {
+        const map = new Map<string, number>();
+        this.filteredBestSellerDays().forEach(d => {
+          d.orders.forEach((order: any) => {
+            const branch = order.branch ?? 'Unknown';
+            const qty = order.items.reduce((s: number, e: any) => s + e.quantity, 0);
+            map.set(branch, (map.get(branch) ?? 0) + qty);
+          });
+        });
+        return map;
+      });
+
+      // Branch performance bars — each branch's share of units sold this period.
+      branchPerformance = computed(() => {
+        const tally = this.bestSellerBranchTally();
+        const total = Array.from(tally.values()).reduce((sum, v) => sum + v, 0);
+        return this.branches
+          .map(branch => {
+            const qty = tally.get(branch) ?? 0;
+            return { branch, qty, percent: total > 0 ? Math.round((qty / total) * 100) : 0 };
+          })
+          .sort((a, b) => b.qty - a.qty);
+      });
+
+      bestSellerBestBranch = computed(() => {
+        const perf = this.branchPerformance();
+        return perf.length > 0 && perf[0].qty > 0 ? perf[0].branch : '—';
+      });
+
+      // Growth — compares total units sold in the current period against the
+      // immediately preceding period of equal length. For 'alltime' (which has
+      // no natural "previous" period), it compares the trailing 30 days against
+      // the 30 days before that instead.
+      bestSellerGrowth = computed((): { percent: number | null; label: string } | null => {
+        const allDays = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date));
+        if (allDays.length < 2) return null;
+
+        const current = this.filteredBestSellerDays();
+        if (current.length === 0) return null;
+
+        let currentDates: string[];
+        let label: string;
+
+        if (this.bestSellerView() === 'alltime') {
+          currentDates = allDays.map(d => d.date).slice(-30);
+          label = 'vs previous 30 days';
+        } else {
+          currentDates = current.map(d => d.date).sort();
+          label = 'vs previous period';
+        }
+
+        const rangeLen = currentDates.length;
+        const earliestCurrent = currentDates[0];
+        const priorDates = allDays.filter(d => d.date < earliestCurrent).slice(-rangeLen).map(d => d.date);
+
+        const sumQty = (dates: string[]) => {
+          const set = new Set(dates);
+          return allDays
+            .filter(d => set.has(d.date))
+            .reduce((sum, d) => sum + d.orders.reduce((s: number, o: any) =>
+              s + o.items.reduce((si: number, e: any) => si + e.quantity, 0), 0), 0);
+        };
+
+        const currentQty = sumQty(currentDates);
+        const priorQty = sumQty(priorDates);
+
+        if (priorDates.length === 0 || priorQty === 0) return { percent: null, label };
+
+        const percent = Math.round(((currentQty - priorQty) / priorQty) * 100);
+        return { percent, label };
+      });
+
+      // Looks up the current menu image for a best-seller row by item name.
+      bestSellerImage(name: string): string {
+        const item = this.cartService.menuItems().find(i => i.name === name);
+        return item?.image || 'chutchut.jpg';
+      }
+
+      // Sales trend for the #1 best seller — last 7 days, oldest to newest.
+      topSellerTrend = computed(() => {
+        const w = 400, h = 140, padding = 24;
+        const top = this.bestSellers()[0];
+        const empty = { points: [] as any[], linePath: '', areaPath: '', labels: [] as any[], w, h };
+        if (!top) return empty;
+
+        const days = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+        if (days.length === 0) return empty;
+
+        const qtyPerDay = days.map(d => {
+          let qty = 0;
+          d.orders.forEach((o: any) => o.items.forEach((e: any) => { if (e.item.name === top.name) qty += e.quantity; }));
+          return { date: d.date, qty };
+        });
+
+        const maxQty = Math.max(1, ...qtyPerDay.map(d => d.qty));
+        const stepX = qtyPerDay.length > 1 ? (w - padding * 2) / (qtyPerDay.length - 1) : 0;
+
+        const points = qtyPerDay.map((d, i) => ({
+          x: padding + i * stepX,
+          y: h - padding - (d.qty / maxQty) * (h - padding * 2),
+          date: d.date,
+          qty: d.qty
+        }));
+
+        const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+        const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - padding} L ${points[0].x.toFixed(1)} ${h - padding} Z`;
+
+        const labels = points.map(p => ({
+          date: p.date,
+          short: new Date(p.date + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short' })
+        }));
+
+        return { points, linePath, areaPath, labels, w, h };
+      });
+
+      // Exports the currently displayed best-seller ranking as a CSV.
+      exportBestSellers(): void {
+        const rows = this.bestSellers();
+        const header = 'Rank,Name,Quantity Sold,Branches\n';
+        const body = rows.map((r, i) => `${i + 1},"${r.name}",${r.qty},"${r.branches.join('; ')}"`).join('\n');
+        const csv = header + body;
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `best-sellers-${this.bestSellerView()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      private toDateStr(d: Date): string {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+
+      historyTransactionTotals = computed(() => {
+        const days = this.cartService.salesHistory();
+        return {
+          dineIn:  days.reduce((sum, d) => sum + d.transactions.dineIn, 0),
+          takeOut: days.reduce((sum, d) => sum + d.transactions.takeOut, 0),
+          grab:    days.reduce((sum, d) => sum + d.transactions.grab, 0)
+        };
+      });
+
+      donutPercents = computed(() => {
+        const t = this.historyTransactionTotals();
+        const total = t.dineIn + t.takeOut + t.grab;
+        if (total === 0) return { dineIn: 0, takeOut: 0, grab: 0 };
+        return {
+          dineIn:  Math.round((t.dineIn  / total) * 100),
+          takeOut: Math.round((t.takeOut / total) * 100),
+          grab:    Math.round((t.grab    / total) * 100)
+        };
+      });
+
+      donutGradient = computed(() => {
+        const t = this.historyTransactionTotals();
+        const total = t.dineIn + t.takeOut + t.grab;
+        if (total === 0) return 'conic-gradient(#f0ebe0 0% 100%)';
+        const p1 = (t.dineIn / total) * 100;
+        const p2 = p1 + (t.takeOut / total) * 100;
+        return `conic-gradient(#CC0000 0% ${p1}%, #FFC200 ${p1}% ${p2}%, #1a1a1a ${p2}% 100%)`;
+      });
+
+      historyDateRangeLabel = computed(() => {
+        const days = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date));
+        if (days.length === 0) return 'No data yet';
+        const fmt = (dateStr: string) => new Date(dateStr + 'T00:00:00')
+          .toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+        if (days.length === 1) return fmt(days[0].date);
+        return `${fmt(days[0].date)} – ${fmt(days[days.length - 1].date)}`;
+      });
+
+      // Sales Trend line chart — last 14 days, oldest to newest.
+      trendChartData = computed(() => {
+        const w = 560, h = 200, padding = 28;
+        const days = [...this.cartService.salesHistory()]
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .slice(-14);
+
+        if (days.length === 0) {
+          return { points: [] as any[], linePath: '', areaPath: '', labels: [] as any[], w, h };
+        }
+
+        const maxSales = Math.max(1, ...days.map(d => d.totalSales));
+        const stepX = days.length > 1 ? (w - padding * 2) / (days.length - 1) : 0;
+
+        const points = days.map((d, i) => ({
+          x: padding + i * stepX,
+          y: h - padding - (d.totalSales / maxSales) * (h - padding * 2),
+          date: d.date,
+          sales: d.totalSales
+        }));
+
+        const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+        const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - padding} L ${points[0].x.toFixed(1)} ${h - padding} Z`;
+
+        const labels = points.map(p => ({
+          date: p.date,
+          short: new Date(p.date + 'T00:00:00').toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })
+        }));
+
+        return { points, linePath, areaPath, labels, w, h };
+      });
+
+      // Most recent orders across all loaded history, newest first.
+      recentTransactions = computed(() => {
+        const days = [...this.cartService.salesHistory()].sort((a, b) => b.date.localeCompare(a.date));
+        const flat: Array<{ date: string; order: any }> = [];
+        for (const d of days) {
+          for (const order of d.orders) flat.push({ date: d.date, order });
+        }
+        return flat.slice(0, 10);
+      });
+
+      itemsSummary(order: any): string {
+        if (!order?.items?.length) return '—';
+        return order.items.map((entry: any) => `${entry.item.name} x${entry.quantity}`).join(', ');
+      }
+
+      // ── POLLING — re-fetch today's orders AND sales history every 30s
+      // to pick up employee transactions and any resets triggered from
+      // the Employee Dashboard (a separate session, so this is the only
+      // way this panel can find out about them). ──
+      private pollInterval: ReturnType<typeof setInterval> | null = null;
+
+      constructor() {
+        this.cartService.loadMenuItems();
+        this.cartService.loadStaff();
+        this.cartService.loadTodayOrders();
+        this.cartService.loadSettings();
+        this.cartService.loadOrdersHistory(); // loads all-time history grouped by date
+
+        this.pollInterval = setInterval(() => {
+          this.cartService.loadTodayOrders();
+          this.cartService.loadOrdersHistory();
+        }, 30000);
+      }
+
+      ngOnDestroy(): void {
+        if (this.pollInterval) clearInterval(this.pollInterval);
+      }
+
+      // ── SETTINGS METHODS ──
+      isTransactionEnabled(mode: string): boolean {
+        return this.cartService.kioskSettings().transactionModes.includes(mode);
+      }
+
+      isPaymentEnabled(mode: string): boolean {
+        return this.cartService.kioskSettings().paymentModes.includes(mode);
+      }
+
+      toggleTransaction(mode: string): void {
+        this.cartService.toggleTransactionMode(mode);
+        this.showSuccess(`Transaction mode "${mode}" updated!`);
+      }
+
+      togglePayment(mode: string): void {
+        this.cartService.togglePaymentMode(mode);
+        this.showSuccess(`Payment mode "${mode}" updated!`);
+      }
+
+      saveManagerPassword(): void {
+        if (!this.newManagerPassword().trim()) return;
+        this.cartService.updateSettings({ managerPassword: this.newManagerPassword() });
+        this.newManagerPassword.set('');
+        this.showSuccess('Manager password updated!');
+      }
+
+      resetSales(): void {
+        // Refresh Sales History as soon as the reset actually completes on
+        // the server, instead of waiting for the next 30s poll — this only
+        // helps when the Manager is the one clicking Reset; if an Employee
+        // resets from their own dashboard, the poll above is what catches it.
+        this.cartService.resetDailySales(() => {
+          this.cartService.loadOrdersHistory();
+        });
+        this.showSuccess('Today\'s sales have been reset!');
+      }
+
+      // ── DANGER ZONE — bulk-clear actions (Settings tab). Both are
+      // permanent and affect every branch, so each is gated behind a
+      // native confirm() prompt before touching the backend. ──
+      clearAllOrders(): void {
+        const confirmed = confirm(
+          'This will permanently delete ALL orders and sales history for every branch. This cannot be undone. Continue?'
+        );
+        if (!confirmed) return;
+
+        this.cartService.clearAllOrders(
+          () => {
+            this.cartService.loadTodayOrders();
+            this.cartService.loadOrdersHistory();
+            this.showSuccess('All orders and transactions cleared.');
+          },
+          (err) => {
+            const detail = err?.error?.message || err?.message || `HTTP ${err?.status ?? 'error'}`;
+            this.showError(`Clear orders failed — ${detail}`);
+          }
+        );
+      }
+
+      clearAllStaff(): void {
+        const confirmed = confirm(
+          'This will permanently delete ALL staff accounts for every branch. This cannot be undone. Continue?'
+        );
+        if (!confirmed) return;
+
+        this.cartService.clearAllStaff(
+          () => this.showSuccess('All staff accounts cleared.'),
+          (err) => {
+            const detail = err?.error?.message || err?.message || `HTTP ${err?.status ?? 'error'}`;
+            this.showError(`Clear staff failed — ${detail}`);
+          }
+        );
+      }
+
+      showSuccess(msg: string): void {
+        this.successMsg.set(msg);
+        setTimeout(() => this.successMsg.set(''), 3000);
+      }
+
+      showError(msg: string): void {
+        this.errorMsg.set(msg);
+        setTimeout(() => this.errorMsg.set(''), 4000);
+      }
+
+      // ── BACKUP EXPORT ──
+      exportBackup(): void {
+        this.cartService.exportBackup();
+      }
+
+      // ── HISTORY (legacy single-day toggle, still used if needed) ──
+      toggleDay(date: string): void {
+        this.expandedDate.set(this.expandedDate() === date ? null : date);
+      }
+
+      refreshHistory(): void {
+        this.cartService.loadOrdersHistory();
+        this.showSuccess('Sales history refreshed!');
+      }
+
+      // ── HISTORY VIEW SWITCHING (daily/weekly/monthly/yearly) ──
+      setHistoryView(view: HistoryView): void {
+        this.historyView.set(view);
+        this.expandedGroup.set(null);
+      }
+
+      toggleGroup(key: string): void {
+        this.expandedGroup.set(this.expandedGroup() === key ? null : key);
+      }
+
+      // ── date helpers ──
+      private formatDayLabel(dateStr: string): string {
+        const d = new Date(dateStr + 'T00:00:00');
+        return d.toLocaleDateString('en-PH', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+      }
+
+      private weekKey(dateStr: string): string {
+        const d = new Date(dateStr + 'T00:00:00');
+        const target = new Date(d.valueOf());
+        const dayNr = (d.getDay() + 6) % 7;
+        target.setDate(target.getDate() - dayNr + 3);
+        const firstThursday = target.valueOf();
+        target.setMonth(0, 1);
+        if (target.getDay() !== 4) {
+          target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+        }
+        const weekNum = 1 + Math.round((firstThursday - target.valueOf()) / (7 * 24 * 3600 * 1000));
+        return `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+      }
+
+      private monthKey(dateStr: string): string {
+        return dateStr.slice(0, 7); // "YYYY-MM"
+      }
+
+      private yearKey(dateStr: string): string {
+        return dateStr.slice(0, 4); // "YYYY"
+      }
+
+      private weekLabel(days: OrderHistoryDay[]): string {
+        const dates = [...days].map(d => d.date).sort();
+        const start = new Date(dates[0] + 'T00:00:00');
+        const end   = new Date(dates[dates.length - 1] + 'T00:00:00');
+        const fmt = (d: Date) => d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+        return `${fmt(start)} – ${fmt(end)}, ${end.getFullYear()}`;
+      }
+
+      private monthLabel(key: string): string {
+        const [year, month] = key.split('-');
+        const d = new Date(+year, +month - 1, 1);
+        return d.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
+      }
+
+      // ── MENU METHODS ──
+        startAddItem(): void {
+          this.newItem.set({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: this.defaultBranchPricing() });
+          this.editingItem.set(null);
+          this.showMenuForm.set(true);
+        }
+
+          startEditItem(item: MenuItem): void {
+          this.editingItem.set(item);
+          const existingPricing = item.branchPricing ?? [];
+          const branchPricing = this.branches.map(branch => {
+            const found = existingPricing.find(bp => bp.branch === branch);
+            return found ? { ...found } : { branch, price: 0 };
+          });
+
+          // Deep-clone variantGroups so editing the form doesn't mutate the
+          // original item (or another row sharing the same object reference)
+          // before Save is actually clicked.
+          this.newItem.set({
+            ...item,
+            branchPricing,
+            variantGroups: (item.variantGroups ?? []).map(g => ({
+              ...g,
+              options: g.options.map(o => ({ ...o }))
+            }))
+          });
+          this.showMenuForm.set(true);
+        }
+
+          saveItem(): void {
+            const item = this.newItem();
+
+            // Each check reports exactly why nothing was saved, instead of
+            // silently doing nothing — this was previously a bare `return`,
+            // which is what made Save look broken when a field was missing.
+            if (!item.name?.trim()) {
+              this.showError('Please enter an item name.');
+              return;
+            }
+            if (!item.category) {
+              this.showError('Please select a category.');
+              return;
+            }
+            const hasValidBranch = (item.branchPricing ?? []).some(bp => bp.price > 0);
+            if (!hasValidBranch) {
+              this.showError('Please set a price greater than ₱0 for at least one branch.');
+              return;
+            }
+
+        // Drop groups/options left blank in the editor rather than saving
+        // empty placeholders.
+        const cleanedGroups = (item.variantGroups ?? [])
+          .filter(g => g.name.trim().length > 0)
+          .map(g => ({ ...g, options: g.options.filter(o => o.label.trim().length > 0) }));
+
+        const finalItem = { ...item, variantGroups: cleanedGroups };
+
+        // The form only closes and shows a success message once the backend
+        // actually confirms the save — if the request fails (e.g. a rejected
+        // POST), the form stays open with the entered data intact and the
+        // real error is shown, instead of quietly discarding the input.
+        const onSaved = (msg: string) => {
+          this.showSuccess(msg);
+          this.showMenuForm.set(false);
+          this.editingItem.set(null);
+        };
+        const onFailed = (err: any) => {
+          const detail = err?.error?.message || err?.message || `HTTP ${err?.status ?? 'error'}`;
+          this.showError(`Save failed — ${detail}`);
+        };
+
+        if (this.editingItem()) {
+          this.cartService.updateMenuItem(
+            { ...this.editingItem()!, ...finalItem } as MenuItem,
+            () => onSaved('Item updated!'),
+            onFailed
+          );
+        } else {
+          this.cartService.addMenuItem(
+            finalItem as Omit<MenuItem, '_id'>,
+            () => onSaved('Item added!'),
+            onFailed
+          );
+        }
+      }
+
+      deleteItem(itemId: string): void {
+        this.cartService.deleteMenuItem(itemId);
+        this.showSuccess('Item deleted!');
+      }
+
+      cancelMenuForm(): void {
+        this.showMenuForm.set(false);
+        this.editingItem.set(null);
+      }
+
+      updateNewItem(field: string, value: string | number): void {
+        this.newItem.set({ ...this.newItem(), [field]: value });
+      }
+
+      onImageFileSelected(event: Event): void {
+        const input = event.target as HTMLInputElement;
+        const file = input.files?.[0];
+        if (!file) return;
+
+        this.imageUploading.set(true);
+        this.cartService.uploadImage(file).subscribe({
+          next: (result) => {
+            // Store the full URL so <img [src]> resolves correctly even though
+            // the Angular app and the upload server run on different origins.
+            this.updateNewItem('image', `https://finalproject-chut-2.onrender.com${result.url}`);
+            this.imageUploading.set(false);
+          },
+          error: (err) => {
+            console.error('Image upload failed:', err);
+            this.imageUploading.set(false);
+            this.showSuccess('Image upload failed — try a different file.');
+          }
+        });
+        input.value = ''; // allows re-selecting the same file later if needed
+      }
+
+      // ── VARIANT GROUP EDITOR (Menu form) ──
+      // A menu item can have multiple variant groups (Sauce, Spice Level,
+      // Extras...), each either 'single' choice (radio) or 'multi' choice
+      // (checkboxes), optionally required, with options that can each carry
+      // a price add-on (priceDelta). This mirrors MenuItem.variantGroups
+      // exactly, so items created here work directly with the Employee
+      // Dashboard's variant picker.
+
+      addVariantGroup(): void {
+        const groups: VariantGroup[] = [...(this.newItem().variantGroups ?? [])];
+        groups.push({ name: '', type: 'single', required: false, options: [] });
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
+
+      removeVariantGroup(groupIndex: number): void {
+        const groups = (this.newItem().variantGroups ?? []).filter((_, i) => i !== groupIndex);
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
+
+      updateBranchPrice(branch: string, price: number): void {
+      const branchPricing = (this.newItem().branchPricing ?? []).map(bp =>
+        bp.branch === branch ? { ...bp, price } : bp
+      );
+      this.newItem.set({ ...this.newItem(), branchPricing });
+    }
 
 
-const opt = (label, priceDelta = 0) => ({ label, priceDelta });
+      updateGroupName(groupIndex: number, value: string): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        groups[groupIndex] = { ...groups[groupIndex], name: value };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-const chickenVariantGroups = [
-  { name: 'Sauce', type: 'single', required: true, options: [opt('Honey Butter'), opt('Lemon Glaze'), opt('Yamyeong'), opt('Cheese')] },
-  { name: 'Spice Level', type: 'single', required: true, options: [opt('Mild'), opt('Medium'), opt('Hot')] },
-  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Rice', 25), opt('Extra Fries', 35), opt('Extra Sauce', 15)] }
-];
+      updateGroupType(groupIndex: number, value: string): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        groups[groupIndex] = { ...groups[groupIndex], type: value as 'single' | 'multi' };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-const friesVariantGroups = [
-  { name: 'Flavor', type: 'single', required: true, options: [opt('Cheese'), opt('Sour Cream'), opt('BBQ')] },
-  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Dip', 15)] }
-];
+      toggleGroupRequired(groupIndex: number): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        groups[groupIndex] = { ...groups[groupIndex], required: !groups[groupIndex].required };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-const corndogVariantGroups = [
-  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Cheese Dip', 15)] }
-];
+      addVariantOption(groupIndex: number): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        const options = [...groups[groupIndex].options, { label: '', priceDelta: 0 }];
+        groups[groupIndex] = { ...groups[groupIndex], options };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-const chillersVariantGroups = [
-  { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Toppings', 10)] }
-];
+      removeVariantOption(groupIndex: number, optionIndex: number): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        const options = groups[groupIndex].options.filter((_, i) => i !== optionIndex);
+        groups[groupIndex] = { ...groups[groupIndex], options };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-const menuSeedData = [
-  { name: 'Wings & Rice 2pcs', price: 90, category: 'Wings & Rice', description: '2 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice 3pcs', price: 110, category: 'Wings & Rice', description: '3 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 2pcs', price: 100, category: 'Wings & Fries', description: '2 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 3pcs', price: 120, category: 'Wings & Fries', description: '3 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 4pcs', price: 125, category: 'Wings & Fries', description: '4 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 5pcs', price: 140, category: 'Wings & Fries', description: '5 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice w/ Gravy 2pcs', price: 80, category: 'Wings & Gravy', description: '2 pcs chicken wings with rice and gravy', image: 'wings-gravy.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice w/ Gravy 3pcs', price: 90, category: 'Wings & Gravy', description: '3 pcs chicken wings with rice and gravy', image: 'wings-gravy2.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice w/ Drinks', price: 175, category: 'Wings & Drinks', description: 'Chicken wings with plain rice and drinks', image: 'wings-rice-drinks.png', variantGroups: chickenVariantGroups },
-  { name: 'Combo 1', price: 180, category: 'Combos', description: '6 pcs chicken only (2 flavor of choice)', image: 'combo1.png', variantGroups: chickenVariantGroups },
-  { name: 'Combo 2', price: 240, category: 'Combos', description: '8 pcs chicken only (flavor of choice)', image: 'combo2.png', variantGroups: chickenVariantGroups },
-  { name: 'Combo 3', price: 154, category: 'Combos', description: '2 pcs chicken with cheese hotdog', image: 'combo2.png', variantGroups: chickenVariantGroups },
-  { name: 'Fries Small', price: 50, category: 'Fries', description: 'Small fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
-  { name: 'Fries Medium', price: 60, category: 'Fries', description: 'Medium fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
-  { name: 'Fries Large', price: 80, category: 'Fries', description: 'Large fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
-  { name: 'Mozzarella Corndog', price: 100, category: 'Corndog', description: 'Chut Chut style mozzarella corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
-  { name: 'Cheese Hotdog Corndog', price: 85, category: 'Corndog', description: 'Chut Chut style cheese hotdog corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
-  { name: 'Cone Twirl Vanilla', price: 25, category: 'Chillers', description: 'Soft serve vanilla cone twirl', image: 'vanilla.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Cone Twirl Chocolate', price: 25, category: 'Chillers', description: 'Soft serve chocolate cone twirl', image: 'chocolate.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Cone Twirl Mix', price: 25, category: 'Chillers', description: 'Soft serve vanilla & chocolate mix', image: 'mix.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Strawberry Sundae', price: 40, category: 'Chillers', description: 'Creamy strawberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Blueberry Sundae', price: 40, category: 'Chillers', description: 'Creamy blueberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Caramel Sundae', price: 40, category: 'Chillers', description: 'Rich caramel sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Crimson Sundae', price: 40, category: 'Chillers', description: 'Crimson flavor sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Lemon Sundae', price: 40, category: 'Chillers', description: 'Refreshing lemon sundae twist', image: 'lemonsundae.png', variantGroups: chillersVariantGroups },
-  { name: 'Giant Twirl', price: 35, category: 'Chillers', description: 'Soft serve cone — Chocolate, Vanilla, or Mix', image: 'giantwirl.png', variantGroups: [{ name: 'Flavor', type: 'single', required: true, options: [opt('Chocolate'), opt('Vanilla'), opt('Mix')] }] },
-  { name: 'Soda Float 7UP', price: 50, category: 'Chillers', description: '7UP soda float with soft serve', image: '7up.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Soda Float Coke', price: 50, category: 'Chillers', description: 'Coke soda float with soft serve', image: 'coke.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Soda Float Royal', price: 50, category: 'Chillers', description: 'Royal soda float with soft serve', image: 'royal.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Chocolate Macchiato', price: 55, category: 'Chillers', description: 'Chut Chut premium chocolate macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
-  { name: 'Caramel Macchiato', price: 55, category: 'Chillers', description: 'Iced caramel macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
-  { name: 'French Vanilla', price: 55, category: 'Chillers', description: 'Chilled iced french vanilla', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
-  { name: "Sundae's Best Choco Crunkies", price: 50, category: 'Chillers', description: 'Sundae overload with toppings', image: 'choco.png', variantGroups: chillersVariantGroups },
-  { name: "Sundae's Best Caramel Nut Crunch", price: 50, category: 'Chillers', description: 'Rocky road sundae with toppings', image: 'caramel.png', variantGroups: chillersVariantGroups },
-  { name: "Sundae's Best Strawberry Crunch", price: 50, category: 'Chillers', description: 'Graham pampig sundae with toppings', image: 'strawberry.png', variantGroups: chillersVariantGroups },
-];
+      updateOptionLabel(groupIndex: number, optionIndex: number, value: string): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        const options = [...groups[groupIndex].options];
+        options[optionIndex] = { ...options[optionIndex], label: value };
+        groups[groupIndex] = { ...groups[groupIndex], options };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-const staffSeedData = [
-  { staffCode: 'EMP001', name: 'Juan Dela Cruz', contact: '09123456789', status: 'Active', dateAdded: '2026-06-01', password: 'juan2024' },
-  { staffCode: 'EMP002', name: 'Maria Santos', contact: '09987654321', status: 'Active', dateAdded: '2026-06-01', password: 'maria2024' },
-];
+      updateOptionPriceDelta(groupIndex: number, optionIndex: number, value: number): void {
+        const groups = [...(this.newItem().variantGroups ?? [])];
+        const options = [...groups[groupIndex].options];
+        options[optionIndex] = { ...options[optionIndex], priceDelta: value };
+        groups[groupIndex] = { ...groups[groupIndex], options };
+        this.newItem.set({ ...this.newItem(), variantGroups: groups });
+      }
 
-// ══════════════════════════════════════════
-//  IMAGE UPLOAD ENDPOINT
-// ══════════════════════════════════════════
+      // ── STAFF METHODS ──
+      startAddStaff(): void {
+        this.newStaff.set({ staffCode: '', name: '', branch: 'Harrison Bazaar', password: '' });
+        this.editingStaff.set(null);
+        this.showStaffForm.set(true);
+      }
 
-app.post('/api/upload', upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).send({ error: 'No file uploaded' });
-  console.log('Image uploaded:', req.file.filename);
-  res.status(201).send({
-    filename: req.file.filename,
-    url: `/uploads/${req.file.filename}`
-  });
-});
+      startEditStaff(staff: Staff): void {
+        this.editingStaff.set(staff);
+        this.newStaff.set({ ...staff });
+        this.showStaffForm.set(true);
+      }
 
-// Handles multer errors (bad file type, too large) with a clean JSON response
-// instead of Express's default HTML error page.
-app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError || err.message?.includes('image files')) {
-    return res.status(400).send({ error: err.message });
-  }
-  next(err);
-});
+      saveStaff(): void {
+        const staff = this.newStaff();
+        if (!staff.staffCode || !staff.name || !staff.password) return;
+        if (this.editingStaff()) {
+          this.cartService.updateStaff({ ...this.editingStaff()!, ...staff } as Staff);
+          this.showSuccess('Staff updated!');
+        } else {
+          this.cartService.addStaff(staff as Omit<Staff, '_id'>);
+          this.showSuccess('Staff added!');
+        }
+        this.showStaffForm.set(false);
+        this.editingStaff.set(null);
+      }
 
-// ── SEED — GATED behind ADMIN_KEY. Call with header x-admin-key: <your ADMIN_KEY>.
-app.post('/api/seed', requireAdminKey, async (req, res) => {
-  const existingMenu  = await MenuItem.countDocuments();
-  const existingStaff = await Staff.countDocuments();
-  if (existingMenu > 0 || existingStaff > 0) {
-    return res.status(400).send({ message: 'Seed skipped — DB already has data.' });
-  }
-  const insertedMenu  = await MenuItem.insertMany(menuSeedData);
-  const insertedStaff = await Staff.insertMany(staffSeedData);
-  let settings = await KioskSettings.findOne();
-  if (!settings) settings = await KioskSettings.create({});
-  console.log(`Seeded ${insertedMenu.length} menu items, ${insertedStaff.length} staff.`);
-  res.status(201).send({
-    message: `Seeded ${insertedMenu.length} menu items and ${insertedStaff.length} staff.`,
-    managerPassword: settings.managerPassword
-  });
-});
+      cancelStaffForm(): void {
+        this.showStaffForm.set(false);
+        this.editingStaff.set(null);
+      }
 
-// ── START SERVER ──
-app.listen(3000, () => {
-  console.log('Chut Chut server is running on port 3000');
-});
+      updateNewStaff(field: string, value: string): void {
+        this.newStaff.set({ ...this.newStaff(), [field]: value });
+      }
+
+      logout(): void {
+        this.router.navigate(['/']);
+      }
+    }
