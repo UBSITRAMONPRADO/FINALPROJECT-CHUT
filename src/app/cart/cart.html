@@ -22,10 +22,10 @@
             <img [src]="entry.item.image" [alt]="entry.item.name" class="cart-item-img" />
             <div class="cart-item-info">
               <h3>{{ entry.item.name }}</h3>
-              <p>₱{{ entry.item.price }} x {{ entry.quantity }}</p>
+              <p>₱{{ lineUnitPrice(entry) }} x {{ entry.quantity }}</p>
             </div>
             <div class="cart-item-right">
-              <span class="cart-item-total">₱{{ entry.item.price * entry.quantity }}</span>
+              <span class="cart-item-total">₱{{ lineTotal(entry) }}</span>
               <button class="remove-btn" (click)="cartService.removeFromCart(entry.item._id)">✕</button>
             </div>
           </div>
