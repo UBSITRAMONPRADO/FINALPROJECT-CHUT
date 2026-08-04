@@ -1,4 +1,4 @@
-  <div class="app-shell">
+<div class="app-shell">
 
     <!-- ══ SIDEBAR ══ -->
     <aside class="sidebar">
@@ -12,25 +12,28 @@
 
       <nav class="sidebar-nav">
         <button class="nav-item" [class.active]="activeTab() === 'dashboard'" (click)="activeTab.set('dashboard')">
-          <span class="nav-icon"></span><span>Dashboard</span>
+          <span class="nav-icon">📊</span><span>Dashboard</span>
         </button>
         <button class="nav-item" [class.active]="activeTab() === 'history'" (click)="activeTab.set('history')">
-          <span class="nav-icon"></span><span>Sales History</span>
+          <span class="nav-icon">📈</span><span>Sales History</span>
         </button>
         <button class="nav-item" [class.active]="activeTab() === 'transactions'" (click)="activeTab.set('transactions')">
-          <span class="nav-icon"></span><span>Transactions </span>
+          <span class="nav-icon">💳</span><span>Transactions </span>
         </button>
         <button class="nav-item" [class.active]="activeTab() === 'menu'" (click)="activeTab.set('menu')">
-          <span class="nav-icon"></span><span>Menu</span>
+          <span class="nav-icon">🍗</span><span>Menu</span>
+        </button>
+        <button class="nav-item" [class.active]="activeTab() === 'bestseller'" (click)="activeTab.set('bestseller')">
+        <span class="nav-icon">🏆</span><span>Best Seller</span>
         </button>
         <button class="nav-item" [class.active]="activeTab() === 'staff'" (click)="activeTab.set('staff')">
-          <span class="nav-icon"></span><span>Staff</span>
+          <span class="nav-icon">👥</span><span>Staff</span>
         </button>
         <button class="nav-item" [class.active]="activeTab() === 'settings'" (click)="activeTab.set('settings')">
-          <span class="nav-icon"></span><span>Settings</span>
+          <span class="nav-icon">⚙️</span><span>Settings</span>
         </button>
         <button class="nav-item" [class.active]="activeTab() === 'accounts'" (click)="activeTab.set('accounts')">
-          <span class="nav-icon"></span><span>Accounts</span>
+          <span class="nav-icon">🔐</span><span>Accounts</span>
         </button>
       </nav>
 
@@ -45,6 +48,9 @@
       @if (successMsg()) {
         <div class="success-msg">✅ {{ successMsg() }}</div>
       }
+      @if (errorMsg()) {
+        <div class="error-msg">⚠️ {{ errorMsg() }}</div>
+      }
 
       <!-- ══ DASHBOARD TAB ══ -->
       @if (activeTab() === 'dashboard') {
@@ -57,19 +63,19 @@
             </div>
           </div>
 
-          <div class="summary-cards">
-            <div class="summary-card yellow">
-              <p class="summary-label">Total Sales Today</p>
-              <p class="summary-value">₱{{ cartService.todaySales() }}</p>
-            </div>
-            <div class="summary-card red">
-              <p class="summary-label">Total Orders Today</p>
-              <p class="summary-value">{{ cartService.todayOrderCount() }}</p>
-            </div>
-            <div class="summary-card cream">
-              <p class="summary-label">Unique Items Sold</p>
-              <p class="summary-value">{{ itemSales().length }}</p>
-            </div>
+        <div class="summary-cards">
+          <button class="summary-card yellow" (click)="activeTab.set('history')">
+            <p class="summary-label">Total Sales Today</p>
+            <p class="summary-value">₱{{ cartService.todaySales() }}</p>
+          </button>
+          <button class="summary-card red" (click)="activeTab.set('transactions')">
+            <p class="summary-label">Total Orders Today</p>
+            <p class="summary-value">{{ cartService.todayOrderCount() }}</p>
+          </button>
+           <button class="summary-card cream" (click)="activeTab.set('bestseller')">
+            <p class="summary-label"> Best Seller</p>
+            <p class="summary-value best-seller-preview">{{ bestSellers()[0]?.name || '—' }}</p>
+          </button>
           </div>
 
           <div class="dashboard-grid">
@@ -462,26 +468,60 @@
         <div class="tab-content">
           <div class="page-header">
             <div class="page-header-text">
-              <h2>Menu Management</h2>
-              <p class="page-subtitle">Add, edit, or remove items from the kiosk menu</p>
-            </div>
-            <button class="add-btn-primary" (click)="startAddItem()">+ Add Item</button>
-          </div>
+                  <h2>Menu Management</h2>
+                  <p class="page-subtitle">Add, edit, or remove items from the kiosk menu</p>
+                </div>
+                <button class="add-btn-primary" (click)="startAddItem()">+ Add Item</button>
+              </div>
+              <div class="branch-tab-row">
+                @for (branch of branches; track branch) {
+                  <button class="branch-tab" [class.active]="activeMenuBranch() === branch" (click)="setMenuBranch(branch)">
+                    {{ branch }}
+                  </button>
+                }
+              </div>
 
           @if (showMenuForm()) {
             <div class="form-card">
               <h3>{{ editingItem() ? 'Edit Item' : 'Add New Item' }}</h3>
               <div class="form-grid">
-                <div class="form-group">
-                  <label>Name</label>
-                  <input type="text" class="form-input" [value]="newItem().name"
-                    (input)="updateNewItem('name', $any($event.target).value)" placeholder="Item name" />
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" class="form-input" [value]="newItem().name"
+                  (input)="updateNewItem('name', $any($event.target).value)" placeholder="Item name" />
+              </div>
+
+              <div class="form-group full-width">
+                <label>Price per Branch</label>
+                <div class="branch-pricing-list">
+                  @for (bp of newItem().branchPricing ?? []; track bp.branch) {
+                    <div class="branch-pricing-row">
+                      <span class="branch-avail-toggle">{{ bp.branch }}</span>
+                      <div class="branch-price-input-wrap">
+                        <span>₱</span>
+                        <input type="number" class="form-input" [value]="bp.price"
+                          (input)="updateBranchPrice(bp.branch, +$any($event.target).value)"
+                          placeholder="0" />
+                      </div>
+                    </div>
+                  }
                 </div>
-                <div class="form-group">
-                  <label>Price (₱)</label>
-                  <input type="number" class="form-input" [value]="newItem().price"
-                    (input)="updateNewItem('price', +$any($event.target).value)" placeholder="0" />
-                </div>
+              </div>
+             
+              <div class="branch-pricing-list">
+                @for (bp of newItem().branchPricing; track bp.branch) {
+                  <div class="branch-pricing-row">
+                    <span class="branch-avail-toggle">{{ bp.branch }}</span>
+                    <div class="branch-price-input-wrap">
+                      <span>₱</span>
+                      <input type="number" class="form-input" [value]="bp.price"
+                        (input)="updateBranchPrice(bp.branch, +$any($event.target).value)"
+                        placeholder="0" />
+                    </div>
+                  </div>
+                }
+              </div>
+
                 <div class="form-group">
                   <label>Category</label>
                   <select class="form-input" [value]="newItem().category"
@@ -572,26 +612,201 @@
           }
 
           <div class="menu-grid">
-            @for (item of cartService.menuItems(); track item._id) {
+            @for (item of menuItemsForActiveBranch(); track item._id) {
               <div class="menu-card">
                 <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
                 <div class="menu-card-info">
                   <p class="menu-card-name">{{ item.name }}</p>
                   <p class="menu-card-cat">{{ item.category }}</p>
-                  <p class="menu-card-price" [style.color]="categoryColor(item.category)">₱{{ item.price }}</p>
-                  @if (item.variantGroups && item.variantGroups.length > 0) {
-                    <p class="menu-card-variants">🎚 {{ item.variantGroups.length }} variant group{{ item.variantGroups.length > 1 ? 's' : '' }}</p>
-                  }
-                </div>
+                  <!-- after -->
+                  <p class="menu-card-price" [style.color]="categoryColor(item.category)">
+                    ₱{{ priceForBranch(item, activeMenuBranch()) }}
+                  </p>
+                        @if (item.variantGroups && item.variantGroups.length > 0) {
+                  <p class="menu-card-variants">🎚 {{ item.variantGroups.length }} variant group{{ item.variantGroups.length > 1 ? 's' : '' }}</p>
+                }
+              </div>
                 <div class="menu-card-actions">
                   <button class="edit-btn" (click)="startEditItem(item)">✏️ Edit</button>
                   <button class="delete-btn" (click)="deleteItem(item._id)">🗑️ Delete</button>
                 </div>
               </div>
             }
+            @if (menuItemsForActiveBranch().length === 0) {
+              <p class="empty-msg">No menu items yet.</p>
+            }
           </div>
         </div>
       }
+
+      <!-- ══ BEST SELLERS TAB ══ -->
+      @if (activeTab() === 'bestseller') {
+      <div class="tab-content">
+        <div class="history-toolbar">
+          <div class="page-header-text">
+            <h2>Best Sellers</h2>
+            <p class="page-subtitle">Monitor your top-performing menu items across all branches</p>
+          </div>
+          <div class="history-controls">
+            <div class="view-toggle">
+              <button class="view-btn" [class.active]="bestSellerView() === 'alltime'" (click)="setBestSellerView('alltime')">All-Time</button>
+              <button class="view-btn" [class.active]="bestSellerView() === 'yearly'"  (click)="setBestSellerView('yearly')">Yearly</button>
+              <button class="view-btn" [class.active]="bestSellerView() === 'monthly'" (click)="setBestSellerView('monthly')">Monthly</button>
+              <button class="view-btn" [class.active]="bestSellerView() === 'weekly'"  (click)="setBestSellerView('weekly')">Weekly</button>
+            </div>
+            <button class="export-btn-outline" (click)="exportBestSellers()">
+              <svg class="export-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Export
+            </button>
+          </div>
+        </div>
+
+        @if (bestSellers().length === 0) {
+          <p class="empty-msg">No sales yet for this period.</p>
+        } @else {
+
+          <!-- KPI CARDS -->
+          <div class="stat-cards">
+            <div class="stat-card">
+              <div class="stat-icon gold-bg">🏆</div>
+              <div>
+                <p class="stat-label">Top Product</p>
+                @if (bestSellers()[0]; as topItem) {
+                  <p class="stat-value bs-truncate" [title]="topItem.name">{{ topItem.name }}</p>
+                  <p class="stat-sub">{{ topItem.qty }} sold</p>
+                }
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon red-bg">📦</div>
+              <div>
+                <p class="stat-label">Total Quantity Sold</p>
+                <p class="stat-value">{{ bestSellerTotalQty() }}</p>
+                <p class="stat-sub">units</p>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon yellow-bg">🏬</div>
+              <div>
+                <p class="stat-label">Best Branch</p>
+                <p class="stat-value bs-truncate" [title]="bestSellerBestBranch()">{{ bestSellerBestBranch() }}</p>
+                <p class="stat-sub">{{ branchPerformance()[0]?.qty || 0 }} sold</p>
+              </div>
+            </div>
+            <div class="stat-card">
+              @if (bestSellerGrowth(); as growth) {
+                <div class="stat-icon"
+                  [class.green-bg]="growth.percent !== null && growth.percent >= 0"
+                  [class.red-bg]="growth.percent !== null && growth.percent < 0"
+                  [class.dark-bg]="growth.percent === null">
+                  {{ growth.percent === null ? '—' : (growth.percent >= 0 ? '📈' : '📉') }}
+                </div>
+                <div>
+                  <p class="stat-label">Growth</p>
+                  <p class="stat-value">{{ growth.percent === null ? '—' : (growth.percent >= 0 ? '+' : '') + growth.percent + '%' }}</p>
+                  <p class="stat-sub">{{ growth.label }}</p>
+                </div>
+              } @else {
+                <div class="stat-icon dark-bg">—</div>
+                <div>
+                  <p class="stat-label">Growth</p>
+                  <p class="stat-value">—</p>
+                  <p class="stat-sub">Not enough data yet</p>
+                </div>
+              }
+            </div>
+          </div>
+
+          <!-- FEATURED TOP PRODUCT + SALES TREND -->
+          @if (bestSellers()[0]; as topSeller) {
+            <div class="bs-feature-row">
+
+              <div class="bs-featured-card">
+                <span class="bs-top-badge">🏆 Top Performer</span>
+                <img [src]="bestSellerImage(topSeller.name)" [alt]="topSeller.name" class="bs-featured-img" />
+                <h3 class="bs-featured-name">{{ topSeller.name }}</h3>
+                <p class="bs-featured-branches">Available in {{ topSeller.branches.join(', ') }}</p>
+                <div class="bs-featured-stats">
+                  <div class="bs-featured-stat">
+                    <p class="bs-featured-stat-value">{{ topSeller.qty }}</p>
+                    <p class="bs-featured-stat-label">Total Sold</p>
+                  </div>
+                  <div class="bs-featured-stat">
+                    <p class="bs-featured-stat-value">{{ topSeller.branches.length }}</p>
+                    <p class="bs-featured-stat-label">Branches</p>
+                  </div>
+                </div>
+                <a class="bs-view-analytics-btn" href="#bsTrendCard">📊 View Sales Trend</a>
+              </div>
+
+              <div class="chart-card bs-trend-card" id="bsTrendCard">
+                <h3>Sales Trend — Last 7 Days</h3>
+                @if (topSellerTrend().points.length === 0) {
+                  <p class="empty-msg">Not enough data yet.</p>
+                } @else {
+                  <svg [attr.viewBox]="'0 0 ' + topSellerTrend().w + ' ' + topSellerTrend().h" class="trend-svg">
+                    <path [attr.d]="topSellerTrend().areaPath" class="trend-area"></path>
+                    <path [attr.d]="topSellerTrend().linePath" class="trend-line"></path>
+                    @for (p of topSellerTrend().points; track p.date) {
+                      <circle [attr.cx]="p.x" [attr.cy]="p.y" r="3.5" class="trend-dot"></circle>
+                    }
+                  </svg>
+                  <div class="trend-x-labels">
+                    @for (p of topSellerTrend().labels; track p.date) {
+                      <span>{{ p.short }}</span>
+                    }
+                  </div>
+                }
+              </div>
+
+            </div>
+          }
+
+          <!-- BRANCH PERFORMANCE -->
+          <div class="history-card bs-branch-card">
+            <div class="bs-section-header">
+              <h3>Branch Performance</h3>
+              <span class="bs-period-tag">{{ bestSellerView() === 'alltime' ? 'All-Time' : bestSellerView() }}</span>
+            </div>
+            <div class="bs-branch-list">
+              @for (b of branchPerformance(); track b.branch; let i = $index) {
+                <div class="bs-branch-row">
+                  <span class="bs-branch-rank">{{ i + 1 }}</span>
+                  <span class="bs-branch-name">🏬 {{ b.branch }}</span>
+                  <div class="bs-branch-bar-track">
+                    <div class="bs-branch-bar-fill" [style.width.%]="b.percent"></div>
+                  </div>
+                  <span class="bs-branch-percent">{{ b.percent }}%</span>
+                  <span class="bs-branch-qty">{{ b.qty }} sold</span>
+                </div>
+              }
+            </div>
+          </div>
+
+          <!-- TOP SELLERS GRID -->
+          <div class="history-card">
+            <div class="bs-section-header">
+              <h3>Top Sellers</h3>
+              <span class="bs-period-tag">{{ bestSellers().length }} item{{ bestSellers().length > 1 ? 's' : '' }}</span>
+            </div>
+            <div class="bs-grid">
+              @for (item of bestSellers(); track item.name; let i = $index) {
+                <div class="bs-grid-card">
+                  <span class="bs-grid-rank" [class.gold]="i===0" [class.silver]="i===1" [class.bronze]="i===2">{{ i + 1 }}</span>
+                  <img [src]="bestSellerImage(item.name)" [alt]="item.name" class="bs-grid-img" />
+                  <p class="bs-grid-name">{{ item.name }}</p>
+                  <p class="bs-grid-qty">{{ item.qty }} sold</p>
+                </div>
+              }
+            </div>
+          </div>
+
+        }
+      </div>
+    }
 
       <!-- ══ STAFF TAB ══ -->
       @if (activeTab() === 'staff') {
@@ -718,10 +933,30 @@
             </div>
 
           </div>
+
+          <!-- DANGER ZONE — permanent, all-branch bulk-clear actions -->
+          <div class="settings-card danger-card">
+            <h2>⚠️ Danger Zone</h2>
+            <p class="settings-desc">These actions are permanent and affect every branch. There is no undo.</p>
+            <div class="danger-actions">
+              <div class="danger-action-row">
+                <div class="danger-action-text">
+                  <p class="danger-action-title">Clear All Orders &amp; Transactions</p>
+                  <p class="danger-action-desc">Deletes today's orders and the entire sales history, for every branch.</p>
+                </div>
+                <button class="danger-btn" (click)="clearAllOrders()">Clear Orders</button>
+              </div>
+              <div class="danger-action-row">
+                <div class="danger-action-text">
+                  <p class="danger-action-title">Clear All Staff</p>
+                  <p class="danger-action-desc">Removes every staff account from every branch.</p>
+                </div>
+                <button class="danger-btn" (click)="clearAllStaff()">Clear Staff</button>
+              </div>
+            </div>
+          </div>
         </div>
       }
-
-      <!-- ══ ACCOUNTS TAB ══ -->
       @if (activeTab() === 'accounts') {
         <div class="tab-content">
           <div class="page-header">
