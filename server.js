@@ -232,7 +232,15 @@ const KioskSettingsSchema = new mongoose.Schema({
   kioskName:        { type: String, default: 'Chut Chut' },
   transactionModes: { type: [String], default: ['Dine In', 'Take Out', 'Grab'] },
   paymentModes:     { type: [String], default: ['Cash', 'Gcash/maya'] },
-  managerPassword:  { type: String, default: 'manager@2026' }
+  managerPassword:  { type: String, default: 'manager@2026' },
+
+  // Marks the moment the Manager last clicked "Reset Today's Sales".
+  // Orders placed BEFORE this instant stop showing up in the live
+  // Dashboard views (Manager Dashboard tab + every Employee Dashboard),
+  // but the Order documents themselves are never touched — Transactions
+  // and Sales History read straight from the Order collection and are
+  // completely unaffected by this marker. See GET /api/orders/today.
+  lastDashboardResetAt: { type: Date, default: null }
 });
 const KioskSettings = mongoose.model('KioskSettings', KioskSettingsSchema);
 
@@ -528,7 +536,18 @@ app.delete('/api/staff/:id', async (req, res) => {
 app.get('/api/orders/today', async (req, res) => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const filter = { timestamp: { $gte: startOfDay } };
+
+  // If the Manager reset the dashboard earlier today, only orders placed
+  // AFTER that reset count as "today" for live dashboard purposes. A
+  // reset from a previous day is ignored — every new calendar day starts
+  // fresh regardless of when the last reset happened.
+  let effectiveStart = startOfDay;
+  const settings = await KioskSettings.findOne();
+  if (settings?.lastDashboardResetAt && settings.lastDashboardResetAt > startOfDay) {
+    effectiveStart = settings.lastDashboardResetAt;
+  }
+
+  const filter = { timestamp: { $gte: effectiveStart } };
   if (req.query.branch) filter.branch = req.query.branch;
   const orders = await Order.find(filter).sort({ timestamp: -1 });
   res.send(orders);
@@ -608,18 +627,21 @@ app.delete('/api/orders/all', async (req, res) => {
   }
 });
 
-app.delete('/api/orders/reset', async (req, res) => {
-  try {
-    await upsertDailySales();
-  } catch (err) {
-    console.error('Failed to finalize dailysales before reset:', err);
-  }
-
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const result = await Order.deleteMany({ timestamp: { $gte: startOfDay } });
-  console.log(`Reset: cleared ${result.deletedCount} orders from today`);
-  res.send({ message: `Cleared ${result.deletedCount} orders from today` });
+// PATCH — soft-resets the "Today" view on the Manager Dashboard AND every
+// Employee Dashboard, without deleting anything. It just moves a marker
+// (KioskSettings.lastDashboardResetAt) forward to "now"; GET /api/orders/today
+// then only returns orders placed after that marker, so today's live sales
+// widgets go back to zero. The actual Order documents are left completely
+// alone, so the Transactions tab and Sales History tab (which query the
+// Order collection directly, not this marker) keep showing every order
+// placed today, before and after the reset, permanently.
+app.patch('/api/dashboard/reset', async (req, res) => {
+  let settings = await KioskSettings.findOne();
+  if (!settings) settings = new KioskSettings();
+  settings.lastDashboardResetAt = new Date();
+  await settings.save();
+  console.log(`Dashboard reset at ${settings.lastDashboardResetAt.toISOString()}`);
+  res.send({ message: 'Dashboard reset.', resetAt: settings.lastDashboardResetAt });
 });
 
 // ══════════════════════════════════════════
