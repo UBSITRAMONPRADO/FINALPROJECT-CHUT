@@ -598,10 +598,12 @@
             </div>
           }
 
-      <div class="menu-grid">
+          <div class="menu-grid">
             @for (item of menuItemsForActiveBranch(); track item._id) {
               <div class="menu-card">
-                <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
+                <div class="menu-card-img-wrap">
+                  <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
+                </div>
                 <div class="menu-card-info">
                   <p class="menu-card-name">{{ item.name }}</p>
                   <p class="menu-card-cat">{{ item.category }}</p>
