@@ -613,10 +613,13 @@
                   <p class="menu-card-variants">🎚 {{ item.variantGroups.length }} variant group{{ item.variantGroups.length > 1 ? 's' : '' }}</p>
                 }
               </div>
-                <div class="menu-card-actions">
-                  <button class="edit-btn" (click)="startEditItem(item)">✏️ Edit</button>
-                  <button class="delete-btn" (click)="deleteItem(item._id)">🗑️ Delete</button>
-                </div>
+              <div class="menu-card-actions">
+                <button class="edit-btn" (click)="startEditItem(item)">
+                  <img src="edit.png" alt="Edit" class="icon-btn-img" /> Edit
+                </button>
+                <button class="delete-btn" (click)="deleteItem(item._id)">
+                  <img src="delete.png" alt="Delete" class="icon-btn-img" /> Delete
+                </button>
               </div>
             }
             @if (menuItemsForActiveBranch().length === 0) {
