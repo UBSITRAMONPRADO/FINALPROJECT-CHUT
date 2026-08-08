@@ -32,7 +32,7 @@ export class DashboardComponent {
   orderStep            = signal<number>(1);
   selectedTransaction  = signal<string>('');
   selectedPayment      = signal<string>('');
-  categories = ['All', 'Chillers', 'Combos', 'Corndog', 'Fries', 'Wings & Drinks', 'Wings & Fries', 'Wings & Gravy', 'Wings & Rice'];
+  categories = ['All','Bilo Bilo & Mais', 'Chillers', 'Combos','Corndog', 'Fries', 'Wings & Drinks', 'Wings & Fries', 'Wings & Gravy', 'Wings & Rice'];
   selectedCategory = signal('All');
   filteredItems = computed(() => {
     const cat = this.selectedCategory();
