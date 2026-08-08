@@ -598,7 +598,7 @@
             </div>
           }
 
-          <div class="menu-grid">
+      <div class="menu-grid">
             @for (item of menuItemsForActiveBranch(); track item._id) {
               <div class="menu-card">
                 <img [src]="item.image" [alt]="item.name" class="menu-card-img" />
@@ -621,6 +621,7 @@
                   <img src="delete.png" alt="Delete" class="icon-btn-img" /> Delete
                 </button>
               </div>
+            </div>
             }
             @if (menuItemsForActiveBranch().length === 0) {
               <p class="empty-msg">No menu items yet.</p>
