@@ -90,7 +90,7 @@
   
   .summary-card.yellow { background: #FFC200; }
   .summary-card.red { background: #CC0000; }
-  .summary-card.cream { background: #fff; border: 2px solid #f0ebe0; }
+  .summary-card.cream { background: #09031a50; border: 2px solid #f0ebe0; }
   
   .summary-label { font-size: 0.85rem; font-weight: 700; color: rgba(0,0,0,0.5); }
   .summary-card.red .summary-label { color: rgba(255,255,255,0.7); }
@@ -150,7 +150,17 @@
   }
   
   .inventory-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f0ebe0; }
-  .inventory-img { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; border: 2px solid #FFC200; flex-shrink: 0; }
+  
+  .inventory-img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  object-position: center 35%;
+  border-radius: 10px;
+  border: 2px solid #FFC200;
+  flex-shrink: 0;
+  background: #f5f0e8;
+}
   .inventory-info { flex: 1; }
   .inventory-name { font-size: 0.82rem; font-weight: 700; color: #1a1a1a; }
   .inventory-qty { font-size: 0.75rem; color: #888; margin-top: 2px; }
@@ -423,20 +433,22 @@
     color: #2e7d32;
     display: inline-block;
   }
+
   .icon-h2 {
-  width: 5em;
-  height: 5em;
+  width: 1.4em;
+  height: 1.4em;
   vertical-align: middle;
-  margin-right: 4px;
+  margin-right: 6px;
   object-fit: contain;
 }
 
 .icon-sm {
-  width: 5em;
-  height: 5em;
+  width: 1.2em;
+  height: 1.2em;
   vertical-align: middle;
-  margin-right: 4px;
+  margin-right: 6px;
   object-fit: contain;
+  flex-shrink: 0;
 }
   
   .status-badge.inactive { background: #fff0f0; color: #CC0000; }
