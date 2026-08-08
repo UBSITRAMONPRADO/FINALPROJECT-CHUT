@@ -144,21 +144,24 @@ mongoose.connect(process.env.MONGODB_URI)
 
 const MenuItemSchema = new mongoose.Schema({
   name:        { type: String, required: true },
-  price:       { type: Number, required: true },
   category:    { type: String, required: true },
   description: { type: String, default: '' },
   image:       { type: String, default: '' },
-
-  // Variant groups for this item — e.g. Sauce, Spice Level, Extras.
-
+  branchPricing: {
+    type: [{
+      branch: { type: String, required: true },
+      price:  { type: Number, default: 0 }
+    }],
+    default: []
+  },
   variantGroups: {
     type: [{
-      name:     { type: String, required: true },       // "Sauce", "Spice Level", "Extras"
+      name:     { type: String, required: true },
       type:     { type: String, enum: ['single', 'multi'], default: 'single' },
       required: { type: Boolean, default: false },
       options: [{
         label:      { type: String, required: true },
-        priceDelta: { type: Number, default: 0 }         // added to unit price when selected
+        priceDelta: { type: Number, default: 0 }
       }]
     }],
     default: []
@@ -856,13 +859,18 @@ app.get('/api/backup', async (req, res) => {
   }));
 
   // Sheet 3 — Menu Items
-  const menuRows = menu.map(item => ({
-    'Name':        item.name,
-    'Category':    item.category,
-    'Price':       item.price,
-    'Description': item.description,
-    'Image':       item.image
-  }));
+  const menuRows = menu.map(item => {
+    const row = {
+      'Name':        item.name,
+      'Category':    item.category,
+      'Description': item.description,
+      'Image':       item.image
+    };
+    (item.branchPricing || []).forEach(bp => {
+      row[`Price (${bp.branch})`] = bp.price;
+    });
+    return row;
+  });
 
   // Sheet 4 — Staff (password excluded from export)
   const staffRows = staff.map(s => ({
@@ -897,48 +905,52 @@ const chillersVariantGroups = [
   { name: 'Extras', type: 'multi', required: false, options: [opt('Extra Toppings', 10)] }
 ];
 
-const menuSeedData = [
-  { name: 'Wings & Rice 2pcs', price: 90, category: 'Wings & Rice', description: '2 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice 3pcs', price: 110, category: 'Wings & Rice', description: '3 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 2pcs', price: 100, category: 'Wings & Fries', description: '2 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 3pcs', price: 120, category: 'Wings & Fries', description: '3 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 4pcs', price: 125, category: 'Wings & Fries', description: '4 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Fries 5pcs', price: 140, category: 'Wings & Fries', description: '5 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice w/ Gravy 2pcs', price: 80, category: 'Wings & Gravy', description: '2 pcs chicken wings with rice and gravy', image: 'wings-gravy.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice w/ Gravy 3pcs', price: 90, category: 'Wings & Gravy', description: '3 pcs chicken wings with rice and gravy', image: 'wings-gravy2.png', variantGroups: chickenVariantGroups },
-  { name: 'Wings & Rice w/ Drinks', price: 175, category: 'Wings & Drinks', description: 'Chicken wings with plain rice and drinks', image: 'wings-rice-drinks.png', variantGroups: chickenVariantGroups },
-  { name: 'Combo 1', price: 180, category: 'Combos', description: '6 pcs chicken only (2 flavor of choice)', image: 'combo1.png', variantGroups: chickenVariantGroups },
-  { name: 'Combo 2', price: 240, category: 'Combos', description: '8 pcs chicken only (flavor of choice)', image: 'combo2.png', variantGroups: chickenVariantGroups },
-  { name: 'Combo 3', price: 154, category: 'Combos', description: '2 pcs chicken with cheese hotdog', image: 'combo2.png', variantGroups: chickenVariantGroups },
-  { name: 'Fries Small', price: 50, category: 'Fries', description: 'Small fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
-  { name: 'Fries Medium', price: 60, category: 'Fries', description: 'Medium fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
-  { name: 'Fries Large', price: 80, category: 'Fries', description: 'Large fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
-  { name: 'Mozzarella Corndog', price: 100, category: 'Corndog', description: 'Chut Chut style mozzarella corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
-  { name: 'Cheese Hotdog Corndog', price: 85, category: 'Corndog', description: 'Chut Chut style cheese hotdog corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
-  { name: 'Cone Twirl Vanilla', price: 25, category: 'Chillers', description: 'Soft serve vanilla cone twirl', image: 'vanilla.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Cone Twirl Chocolate', price: 25, category: 'Chillers', description: 'Soft serve chocolate cone twirl', image: 'chocolate.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Cone Twirl Mix', price: 25, category: 'Chillers', description: 'Soft serve vanilla & chocolate mix', image: 'mix.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Strawberry Sundae', price: 40, category: 'Chillers', description: 'Creamy strawberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Blueberry Sundae', price: 40, category: 'Chillers', description: 'Creamy blueberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Caramel Sundae', price: 40, category: 'Chillers', description: 'Rich caramel sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Crimson Sundae', price: 40, category: 'Chillers', description: 'Crimson flavor sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
-  { name: 'Lemon Sundae', price: 40, category: 'Chillers', description: 'Refreshing lemon sundae twist', image: 'lemonsundae.png', variantGroups: chillersVariantGroups },
-  { name: 'Giant Twirl', price: 35, category: 'Chillers', description: 'Soft serve cone — Chocolate, Vanilla, or Mix', image: 'giantwirl.png', variantGroups: [{ name: 'Flavor', type: 'single', required: true, options: [opt('Chocolate'), opt('Vanilla'), opt('Mix')] }] },
-  { name: 'Soda Float 7UP', price: 50, category: 'Chillers', description: '7UP soda float with soft serve', image: '7up.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Soda Float Coke', price: 50, category: 'Chillers', description: 'Coke soda float with soft serve', image: 'coke.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Soda Float Royal', price: 50, category: 'Chillers', description: 'Royal soda float with soft serve', image: 'royal.jpg', variantGroups: chillersVariantGroups },
-  { name: 'Chocolate Macchiato', price: 55, category: 'Chillers', description: 'Chut Chut premium chocolate macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
-  { name: 'Caramel Macchiato', price: 55, category: 'Chillers', description: 'Iced caramel macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
-  { name: 'French Vanilla', price: 55, category: 'Chillers', description: 'Chilled iced french vanilla', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
-  { name: "Sundae's Best Choco Crunkies", price: 50, category: 'Chillers', description: 'Sundae overload with toppings', image: 'choco.png', variantGroups: chillersVariantGroups },
-  { name: "Sundae's Best Caramel Nut Crunch", price: 50, category: 'Chillers', description: 'Rocky road sundae with toppings', image: 'caramel.png', variantGroups: chillersVariantGroups },
-  { name: "Sundae's Best Strawberry Crunch", price: 50, category: 'Chillers', description: 'Graham pampig sundae with toppings', image: 'strawberry.png', variantGroups: chillersVariantGroups },
-  {name: "Sundae's Best Blueberry Crunch", price: 50, category: 'Chillers', description: 'Blueberry sundae with toppings', image: 'blueberry.png', variantGroups: chillersVariantGroups },
-  { name: 'Ginataang Bilo-Bilo', price: 50, category: 'Ginataan', description: 'Sticky rice balls in sweet coconut milk', image: 'bilo-bilo.png', variantGroups: [] },
-  { name: 'Ginataang Mais', price: 50, category: 'Ginataan', description: 'Sweet corn in coconut milk', image: 'mais.png', variantGroups: [] }
+const branchPricing = (price) => [
+  { branch: 'Harrison Bazaar', price },
+  { branch: 'Pines Arcade',    price },
+  { branch: 'Porta Vaga',      price }
 ];
 
-
+const menuSeedData = [
+  { name: 'Wings & Rice 2pcs', branchPricing: branchPricing(90), category: 'Wings & Rice', description: '2 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice 3pcs', branchPricing: branchPricing(110), category: 'Wings & Rice', description: '3 pcs chicken wings with steamed rice', image: 'wings-rice.jpg', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 2pcs', branchPricing: branchPricing(100), category: 'Wings & Fries', description: '2 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 3pcs', branchPricing: branchPricing(120), category: 'Wings & Fries', description: '3 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 4pcs', branchPricing: branchPricing(125), category: 'Wings & Fries', description: '4 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Fries 5pcs', branchPricing: branchPricing(140), category: 'Wings & Fries', description: '5 pcs chicken wings with fries', image: 'wingsfries.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice w/ Gravy 2pcs', branchPricing: branchPricing(80), category: 'Wings & Gravy', description: '2 pcs chicken wings with rice and gravy', image: 'wings-gravy.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice w/ Gravy 3pcs', branchPricing: branchPricing(90), category: 'Wings & Gravy', description: '3 pcs chicken wings with rice and gravy', image: 'wings-gravy2.png', variantGroups: chickenVariantGroups },
+  { name: 'Wings & Rice w/ Drinks', branchPricing: branchPricing(175), category: 'Wings & Drinks', description: 'Chicken wings with plain rice and drinks', image: 'wings-rice-drinks.png', variantGroups: chickenVariantGroups },
+  { name: 'Combo 1', branchPricing: branchPricing(180), category: 'Combos', description: '6 pcs chicken only (2 flavor of choice)', image: 'combo1.png', variantGroups: chickenVariantGroups },
+  { name: 'Combo 2', branchPricing: branchPricing(240), category: 'Combos', description: '8 pcs chicken only (flavor of choice)', image: 'combo2.png', variantGroups: chickenVariantGroups },
+  { name: 'Combo 3', branchPricing: branchPricing(154), category: 'Combos', description: '2 pcs chicken with cheese hotdog', image: 'combo2.png', variantGroups: chickenVariantGroups },
+  { name: 'Fries Small', branchPricing: branchPricing(50), category: 'Fries', description: 'Small fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
+  { name: 'Fries Medium', branchPricing: branchPricing(60), category: 'Fries', description: 'Medium fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
+  { name: 'Fries Large', branchPricing: branchPricing(80), category: 'Fries', description: 'Large fries — Cheese, Sour Cream, or BBQ', image: 'fries.jpg', variantGroups: friesVariantGroups },
+  { name: 'Mozzarella Corndog', branchPricing: branchPricing(100), category: 'Corndog', description: 'Chut Chut style mozzarella corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
+  { name: 'Cheese Hotdog Corndog', branchPricing: branchPricing(85), category: 'Corndog', description: 'Chut Chut style cheese hotdog corndog', image: 'corndog.jpg', variantGroups: corndogVariantGroups },
+  { name: 'Cone Twirl Vanilla', branchPricing: branchPricing(25), category: 'Chillers', description: 'Soft serve vanilla cone twirl', image: 'vanilla.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Cone Twirl Chocolate', branchPricing: branchPricing(25), category: 'Chillers', description: 'Soft serve chocolate cone twirl', image: 'chocolate.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Cone Twirl Mix', branchPricing: branchPricing(25), category: 'Chillers', description: 'Soft serve vanilla & chocolate mix', image: 'mix.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Strawberry Sundae', branchPricing: branchPricing(40), category: 'Chillers', description: 'Creamy strawberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Blueberry Sundae', branchPricing: branchPricing(40), category: 'Chillers', description: 'Creamy blueberry sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Caramel Sundae', branchPricing: branchPricing(40), category: 'Chillers', description: 'Rich caramel sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Crimson Sundae', branchPricing: branchPricing(40), category: 'Chillers', description: 'Crimson flavor sundae twist', image: 'sundaetwist.png', variantGroups: chillersVariantGroups },
+  { name: 'Lemon Sundae', branchPricing: branchPricing(40), category: 'Chillers', description: 'Refreshing lemon sundae twist', image: 'lemonsundae.png', variantGroups: chillersVariantGroups },
+  { name: 'Giant Twirl', branchPricing: branchPricing(35), category: 'Chillers', description: 'Soft serve cone — Chocolate, Vanilla, or Mix', image: 'giantwirl.png', variantGroups: [{ name: 'Flavor', type: 'single', required: true, options: [opt('Chocolate'), opt('Vanilla'), opt('Mix')] }] },
+  { name: 'Soda Float 7UP', branchPricing: branchPricing(50), category: 'Chillers', description: '7UP soda float with soft serve', image: '7up.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Soda Float Coke', branchPricing: branchPricing(50), category: 'Chillers', description: 'Coke soda float with soft serve', image: 'coke.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Soda Float Royal', branchPricing: branchPricing(50), category: 'Chillers', description: 'Royal soda float with soft serve', image: 'royal.jpg', variantGroups: chillersVariantGroups },
+  { name: 'Chocolate Macchiato', branchPricing: branchPricing(55), category: 'Chillers', description: 'Chut Chut premium chocolate macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
+  { name: 'Caramel Macchiato', branchPricing: branchPricing(55), category: 'Chillers', description: 'Iced caramel macchiato', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
+  { name: 'French Vanilla', branchPricing: branchPricing(55), category: 'Chillers', description: 'Chilled iced french vanilla', image: 'icedcoffee.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Choco Crunkies", branchPricing: branchPricing(50), category: 'Chillers', description: 'Sundae overload with toppings', image: 'choco.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Caramel Nut Crunch", branchPricing: branchPricing(50), category: 'Chillers', description: 'Rocky road sundae with toppings', image: 'caramel.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Strawberry Crunch", branchPricing: branchPricing(50), category: 'Chillers', description: 'Graham pampig sundae with toppings', image: 'strawberry.png', variantGroups: chillersVariantGroups },
+  { name: "Sundae's Best Blueberry Crunch", branchPricing: branchPricing(50), category: 'Chillers', description: 'Blueberry sundae with toppings', image: 'blueberry.png', variantGroups: chillersVariantGroups },
+  { name: 'Ginataang Bilo-Bilo', branchPricing: branchPricing(50), category: 'Ginataan', description: 'Sticky rice balls in sweet coconut milk', image: 'bilo-bilo.png', variantGroups: [] },
+  { name: 'Ginataang Mais', branchPricing: branchPricing(50), category: 'Ginataan', description: 'Sweet corn in coconut milk', image: 'mais.png', variantGroups: [] }
+];
 
 // ══════════════════════════════════════════
 //  IMAGE UPLOAD ENDPOINT
