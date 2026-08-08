@@ -398,6 +398,11 @@ button.summary-card:active { transform: translateY(0); }
   justify-content: center;
   flex-shrink: 0;
 }
+.icon-btn-img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
 
 .icon-btn:hover { background: #CC0000; }
 
