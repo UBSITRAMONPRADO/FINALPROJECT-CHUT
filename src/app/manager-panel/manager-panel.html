@@ -851,14 +851,15 @@
                 <span class="staff-name">{{ staff.staffCode }}</span>
                 <span class="staff-name">{{ staff.name }}</span>
                 <span class="staff-branch">{{ staff.branch }}</span>
-                <span class="staff-actions">
-                 <button class="edit-btn" (click)="startEditStaff(staff)">
-                    <img src="edit.png" alt="Edit" class="icon-btn-img" />
-                  </button>
-                  <button class="delete-btn" (click)="cartService.removeStaff(staff._id)">
-                    <img src="delete.png" alt="Delete" class="icon-btn-img" />
-                  </button>
-              </div>
+           <span class="staff-actions">
+              <button class="edit-btn" (click)="startEditStaff(staff)">
+                <img src="edit.png" alt="Edit" class="icon-btn-img" />
+              </button>
+              <button class="delete-btn" (click)="cartService.removeStaff(staff._id)">
+                <img src="delete.png" alt="Delete" class="icon-btn-img" />
+              </button>
+            </span>
+            </div>
             }
           </div>
         </div>
