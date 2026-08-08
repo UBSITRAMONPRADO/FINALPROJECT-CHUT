@@ -403,7 +403,11 @@ button.summary-card:active { transform: translateY(0); }
   height: 16px;
   object-fit: contain;
 }
-
+.edit-btn, .delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .icon-btn:hover { background: #CC0000; }
 
 .export-btn {
