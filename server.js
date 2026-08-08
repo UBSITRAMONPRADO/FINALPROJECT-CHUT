@@ -10,17 +10,14 @@ const path = require('path');
 const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-
 const app = express();
 
 // ── TRUST RENDER'S PROXY ──
-// Render sits in front of your app behind a reverse proxy, so without this
-// every request looks like it comes from the same internal IP — which
-// breaks IP-based rate limiting below (everyone would share one bucket).
 app.set('trust proxy', 1);
-
 // ── SECURITY HEADERS ──
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
 
 // ── CORS — locked down to known frontend origins only ──
 // Add every domain your Angular app is actually served from (production +
@@ -75,6 +72,9 @@ app.use((req, res, next) => {
   sanitizeInPlace(req.query); // mutated, never reassigned — safe on Express 5
   next();
 });
+
+const uploadRoutes = require('./routes/upload');
+app.use('/api/upload', uploadRoutes);
 
 // ── RATE LIMITING ──
 // General ceiling across the whole API.
