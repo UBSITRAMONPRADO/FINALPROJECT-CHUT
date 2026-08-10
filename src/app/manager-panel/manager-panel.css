@@ -753,6 +753,18 @@ button.summary-card:active { transform: translateY(0); }
 
 .save-btn:hover { background: #FFC200; color: #000; }
 
+.menu-search-wrap { margin-bottom: 4px; }
+.menu-search-input {
+  width: 100%;
+  max-width: 400px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 2px solid #f0ebe0;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.menu-search-input:focus { border-color: #FFC200; }
 .menu-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
