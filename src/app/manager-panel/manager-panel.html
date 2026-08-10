@@ -593,7 +593,9 @@
               </div>
               <div class="form-actions">
                 <button class="cancel-btn" (click)="cancelMenuForm()">Cancel</button>
-                <button class="save-btn" (click)="saveItem()">{{ editingItem() ? 'Save Changes' : 'Add Item' }}</button>
+                <button class="save-btn" (click)="saveItem()" [disabled]="imageUploading()">
+                  {{ imageUploading() ? 'Uploading image…' : (editingItem() ? 'Save Changes' : 'Add Item') }}
+                </button>
               </div>
             </div>
           }
