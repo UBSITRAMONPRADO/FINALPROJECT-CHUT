@@ -14,9 +14,9 @@ type BestSellerView = 'alltime' | 'yearly' | 'monthly' | 'weekly' | 'custom';
   styleUrl: './manager-panel.css'
 })
 export class ManagerPanelComponent implements OnDestroy {
-  defaultBranchPricing(): BranchPricing[] | undefined {
-    throw new Error('Method not implemented.');
-  }
+ defaultBranchPricing(): BranchPricing[] {
+    return this.branches.map(branch => ({ branch, price: 0 }));
+}
   router      = inject(Router);
   cartService = inject(CartServices);
 
