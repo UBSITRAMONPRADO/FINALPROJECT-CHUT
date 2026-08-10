@@ -20,6 +20,11 @@ export interface BranchPricing {
   price: number;
 }
 
+export interface Category {
+  name: string;
+  color: string;
+}
+
 export interface MenuItem {
   _id: string;
   name: string;
@@ -94,6 +99,7 @@ export interface KioskSettings {
   transactionModes: string[];
   paymentModes: string[];
   managerPassword: string;
+  categories: Category[];
 }
 
 // One entry per day returned by GET /api/orders/history
@@ -128,13 +134,23 @@ throw new Error('Method not implemented.');
   private api = 'https://finalproject-chut-2.onrender.com/api';
 
   // ── SETTINGS ──
-  kioskSettings = signal<KioskSettings>({
-    kioskName: 'Chut Chut',
-    transactionModes: ['Dine In', 'Take Out', 'Grab'],
-    paymentModes: ['Cash', 'Online Payment', 'Grab'],
-    managerPassword: 'admin2024'
-  });
-
+kioskSettings = signal<KioskSettings>({
+  kioskName: 'Chut Chut',
+  transactionModes: ['Dine In', 'Take Out', 'Grab'],
+  paymentModes: ['Cash', 'Online Payment', 'Grab'],
+  managerPassword: 'admin2024',
+  categories: [
+    { name: 'Bilo Bilo & Mais', color: '#c33aed' },
+    { name: 'Chillers',         color: '#2E9BCC' },
+    { name: 'Combos',           color: '#7C3AED' },
+    { name: 'Corndog',          color: '#E8792F' },
+    { name: 'Fries',            color: '#FFC200' },
+    { name: 'Wings & Drinks',   color: '#CC0000' },
+    { name: 'Wings & Fries',    color: '#CC0000' },
+    { name: 'Wings & Gravy',    color: '#CC0000' },
+    { name: 'Wings & Rice',     color: '#CC0000' }
+  ]
+});
   // ── MENU ITEMS ──
   menuItems = signal<MenuItem[]>([]);
 
@@ -348,14 +364,9 @@ throw new Error('Method not implemented.');
   }
 
   // Soft-resets the live "Today" view on the Manager Dashboard and every
-  // Employee Dashboard. This does NOT delete any orders — it just moves a
-  // marker on the backend forward to "now", so GET /api/orders/today stops
-  // returning orders placed before that moment. The Transactions tab and
-  // Sales History tab pull from the full Order history independently of
-  // this marker, so every order placed today keeps showing there,
   // unaffected, both before and after the reset.
-  resetDailySales(onComplete?: () => void): void {
-    this.http.patch(`${this.api}/dashboard/reset`, {}).subscribe(() => {
+ resetDailySales(onComplete?: () => void): void {
+    this.http.delete(`${this.api}/orders/reset`).subscribe(() => {
       this.completedOrders.set([]); // instant local feedback; server truth confirmed on next poll
       if (onComplete) onComplete();
     });
@@ -480,7 +491,70 @@ throw new Error('Method not implemented.');
     this.updateSettings({ paymentModes: updated });
   }
 
-  // ══════════════════════════════════════════
+  addCategory(name: string, color: string, onSuccess?: () => void, onError?: (err: any) => void): void {
+    this.http.post<KioskSettings>(`${this.api}/settings/categories`, { name, color }).subscribe({
+      next: (saved) => {
+        this.kioskSettings.set(saved);
+        if (onSuccess) onSuccess();
+      },
+      error: (err) => {
+        console.error('Add category failed:', err);
+        if (onError) onError(err);
+      }
+      });
+  }
+
+  // Renaming cascades: the backend updates every MenuItem using the old
+  // category name, so we mirror that locally too instead of waiting on a
+  // full loadMenuItems() round trip.
+  updateCategory(
+    oldName: string,
+    changes: { name?: string; color?: string },
+    onSuccess?: (itemsUpdated: number) => void,
+    onError?: (err: any) => void
+  ): void {
+    this.http.put<{ settings: KioskSettings; itemsUpdated: number }>(
+      `${this.api}/settings/categories/${encodeURIComponent(oldName)}`,
+      changes
+    ).subscribe({
+      next: (res) => {
+        this.kioskSettings.set(res.settings);
+        if (changes.name && changes.name !== oldName) {
+          this.menuItems.set(
+            this.menuItems().map(m => m.category === oldName ? { ...m, category: changes.name! } : m)
+          );
+        }
+        if (onSuccess) onSuccess(res.itemsUpdated);
+      },
+      error: (err) => {
+        console.error('Update category failed:', err);
+        if (onError) onError(err);
+      }
+    });
+  }
+
+  // Deleting a category does NOT touch existing menu items server-side —
+  // affectedItems tells the caller how many items are now on an
+  // unlisted category, so the Manager Panel can warn about it.
+  deleteCategory(
+    name: string,
+    onSuccess?: (affectedItems: number) => void,
+    onError?: (err: any) => void
+  ): void {
+    this.http.delete<{ settings: KioskSettings; affectedItems: number }>(
+      `${this.api}/settings/categories/${encodeURIComponent(name)}`
+    ).subscribe({
+      next: (res) => {
+        this.kioskSettings.set(res.settings);
+        if (onSuccess) onSuccess(res.affectedItems);
+      },
+      error: (err) => {
+        console.error('Delete category failed:', err);
+        if (onError) onError(err);
+      }
+    });
+  }
+    // ══════════════════════════════════════════
   //  STAFF METHODS
   // ══════════════════════════════════════════
 
