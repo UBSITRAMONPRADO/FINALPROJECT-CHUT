@@ -73,8 +73,12 @@ app.use((req, res, next) => {
   next();
 });
 
-const uploadRoutes = require('./routes/upload');
-app.use('/api/upload', uploadRoutes);
+// ── FIX: removed the unused `routes/upload.js` router mount that used to
+// sit here (`app.use('/api/upload', uploadRoutes)`). Nothing in the
+// frontend ever called its `/api/upload/product-image` endpoint — every
+// real upload goes through the inline `app.post('/api/upload', ...)`
+// handler further down in this file, which is unchanged. You can delete
+// routes/upload.js entirely; it's no longer required anywhere. ──
 
 // ── RATE LIMITING ──
 // General ceiling across the whole API.
