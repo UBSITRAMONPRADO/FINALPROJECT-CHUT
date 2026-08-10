@@ -14,6 +14,9 @@ type BestSellerView = 'alltime' | 'yearly' | 'monthly' | 'weekly' | 'custom';
   styleUrl: './manager-panel.css'
 })
 export class ManagerPanelComponent implements OnDestroy {
+  defaultBranchPricing(): BranchPricing[] | undefined {
+    throw new Error('Method not implemented.');
+  }
   router      = inject(Router);
   cartService = inject(CartServices);
 
@@ -58,20 +61,27 @@ export class ManagerPanelComponent implements OnDestroy {
   // ── MENU MANAGEMENT ──
   showMenuForm  = signal(false);
   editingItem   = signal<MenuItem | null>(null);
-newItem       = signal<Partial<MenuItem>>({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: this.defaultBranchPricing() });
+  newItem       = signal<Partial<MenuItem>>({ name: '', category: '', description: '', image: '', variantGroups: [], branchPricing: this.defaultBranchPricing() });
 
 //— branch sub-tabs ──
 activeMenuBranch = signal<string>(this.branches[0]);
+menuSearchQuery = signal<string>('');
 
-setMenuBranch(branch: string): void {
-  this.activeMenuBranch.set(branch);
-}
+  setMenuBranch(branch: string): void {
+    this.activeMenuBranch.set(branch);
+  }
 
-menuItemsForActiveBranch = computed(() => this.cartService.menuItems());
-
-private defaultBranchPricing(): BranchPricing[] {
-  return this.branches.map(branch => ({ branch, price: 0 }));
-}
+  menuItemsForActiveBranch = computed(() => {
+    const query = this.menuSearchQuery().trim().toLowerCase();
+    let items = this.cartService.menuItems();
+    if (query) {
+      items = items.filter(item =>
+        item.name.toLowerCase().includes(query) ||
+        item.category.toLowerCase().includes(query)
+      );
+    }
+    return [...items].sort((a, b) => a.name.localeCompare(b.name));
+  });
   // ── STAFF MANAGEMENT ──
   showStaffForm  = signal(false);
   editingStaff   = signal<Staff | null>(null);
