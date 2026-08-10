@@ -435,22 +435,21 @@
   }
 
   .icon-h2 {
-  width: 1.4em;
-  height: 1.4em;
+  width: 5em;
+  height: 5em;
   vertical-align: middle;
   margin-right: 6px;
   object-fit: contain;
 }
 
 .icon-sm {
-  width: 1.2em;
-  height: 1.2em;
+  width: 5em;
+  height: 5em;
   vertical-align: middle;
   margin-right: 6px;
   object-fit: contain;
   flex-shrink: 0;
 }
-  
   .status-badge.inactive { background: #fff0f0; color: #CC0000; }
   .staff-actions { display: flex; gap: 8px; }
   
