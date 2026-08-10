@@ -33,13 +33,22 @@ export class DashboardComponent {
   selectedTransaction  = signal<string>('');
   selectedPayment      = signal<string>('');
   categories = ['All','Bilo Bilo & Mais', 'Chillers', 'Combos','Corndog', 'Fries', 'Wings & Drinks', 'Wings & Fries', 'Wings & Gravy', 'Wings & Rice'];
-  selectedCategory = signal('All');
+ selectedCategory = signal('All');
+  searchQuery = signal<string>('');
+
   filteredItems = computed(() => {
     const cat = this.selectedCategory();
-    if (cat === 'All') return this.cartService.menuItems();
-    return this.cartService.menuItems().filter(item => item.category === cat);
-  });
+    const query = this.searchQuery().trim().toLowerCase();
 
+    let items = this.cartService.menuItems();
+    if (cat !== 'All') {
+      items = items.filter(item => item.category === cat);
+    }
+    if (query) {
+      items = items.filter(item => item.name.toLowerCase().includes(query));
+    }
+    return [...items].sort((a, b) => a.name.localeCompare(b.name));
+  });
   // ── CHECKOUT DRAWER — INLINE VARIANT EDITING ──
   // Tracks which cart line's "Special instructions" textarea is open,
   // keyed by item._id + optionsKey (so two lines of the same item with
