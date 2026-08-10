@@ -130,12 +130,18 @@
             </div>
           </div>
         }
-
         @if (orderStep() === 2) {
           <div class="pos-topline">
             <span class="pos-mode-badge">{{ selectedTransaction() }}</span>
           </div>
-
+            <div class="pos-search-wrap">
+              <input
+                type="text"
+                class="pos-search-input"
+                placeholder="🔍 Search menu items..."
+                [value]="searchQuery()"
+                (input)="searchQuery.set($any($event.target).value)" />
+            </div>  
           <div class="pos-chips">
             @for (cat of categories; track cat) {
               <button
