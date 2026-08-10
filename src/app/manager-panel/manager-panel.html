@@ -480,6 +480,14 @@
                   </button>
                 }
               </div>
+              <div class="menu-search-wrap">
+                <input
+                  type="text"
+                  class="menu-search-input"
+                  placeholder="🔍 Search by name or category..."
+                  [value]="menuSearchQuery()"
+                  (input)="menuSearchQuery.set($any($event.target).value)" />
+              </div>
 
           @if (showMenuForm()) {
             <div class="form-card">
