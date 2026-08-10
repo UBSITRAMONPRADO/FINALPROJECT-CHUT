@@ -234,7 +234,24 @@ const KioskSettingsSchema = new mongoose.Schema({
   kioskName:        { type: String, default: 'Chut Chut' },
   transactionModes: { type: [String], default: ['Dine In', 'Take Out', 'Grab'] },
   paymentModes:     { type: [String], default: ['Cash', 'Gcash/maya'] },
-  managerPassword:  { type: String, default: 'manager@2026' }
+  managerPassword:  { type: String, default: 'manager@2026' },
+  categories: {
+    type: [{
+      name:  { type: String, required: true },
+      color: { type: String, default: '#1A1A1A' }
+    }],
+    default: [
+      { name: 'Bilo Bilo & Mais', color: '#c33aed' },
+      { name: 'Chillers',         color: '#2E9BCC' },
+      { name: 'Combos',           color: '#7C3AED' },
+      { name: 'Corndog',          color: '#E8792F' },
+      { name: 'Fries',            color: '#FFC200' },
+      { name: 'Wings & Drinks',   color: '#CC0000' },
+      { name: 'Wings & Fries',    color: '#CC0000' },
+      { name: 'Wings & Gravy',    color: '#CC0000' },
+      { name: 'Wings & Rice',     color: '#CC0000' }
+    ]
+  }
 });
 const KioskSettings = mongoose.model('KioskSettings', KioskSettingsSchema);
 
@@ -804,6 +821,70 @@ app.put('/api/settings', async (req, res) => {
   res.send(settings);
 });
 
+// POST — add a new category
+app.post('/api/settings/categories', async (req, res) => {
+  const { name, color } = req.body;
+  if (!name || !name.trim()) return res.status(400).send({ error: 'Category name is required' });
+
+  let settings = await KioskSettings.findOne();
+  if (!settings) settings = await KioskSettings.create({});
+
+  const exists = settings.categories.some(c => c.name.toLowerCase() === name.trim().toLowerCase());
+  if (exists) return res.status(400).send({ error: 'Category already exists' });
+
+  settings.categories.push({ name: name.trim(), color: color || '#1A1A1A' });
+  await settings.save();
+  res.status(201).send(settings);
+});
+
+// PUT — rename and/or recolor a category. If the name changes, cascades
+// the rename to every MenuItem currently using the old category name so
+// nothing gets silently orphaned.
+app.put('/api/settings/categories/:oldName', async (req, res) => {
+  const oldName = req.params.oldName;
+  const { name: newName, color } = req.body;
+
+  let settings = await KioskSettings.findOne();
+  if (!settings) return res.status(404).send({ error: 'Settings not found' });
+
+  const cat = settings.categories.find(c => c.name === oldName);
+  if (!cat) return res.status(404).send({ error: 'Category not found' });
+
+  let itemsUpdated = 0;
+  if (newName && newName.trim() && newName.trim() !== oldName) {
+    const dup = settings.categories.some(
+      c => c.name.toLowerCase() === newName.trim().toLowerCase() && c.name !== oldName
+    );
+    if (dup) return res.status(400).send({ error: 'A category with that name already exists' });
+
+    const result = await MenuItem.updateMany({ category: oldName }, { $set: { category: newName.trim() } });
+    itemsUpdated = result.modifiedCount;
+    cat.name = newName.trim();
+  }
+  if (color) cat.color = color;
+
+  await settings.save();
+  res.send({ settings, itemsUpdated });
+});
+
+// DELETE — removes a category from the list. Existing menu items using it
+// are left untouched (not deleted, category string unchanged) — the
+// response reports how many so the manager panel can warn before/after.
+app.delete('/api/settings/categories/:name', async (req, res) => {
+  const name = req.params.name;
+  let settings = await KioskSettings.findOne();
+  if (!settings) return res.status(404).send({ error: 'Settings not found' });
+
+  const before = settings.categories.length;
+  settings.categories = settings.categories.filter(c => c.name !== name);
+  if (settings.categories.length === before) {
+    return res.status(404).send({ error: 'Category not found' });
+  }
+  await settings.save();
+
+  const affectedItems = await MenuItem.countDocuments({ category: name });
+  res.send({ settings, affectedItems });
+});
 // ══════════════════════════════════════════
 //  BACKUP EXPORT ENDPOINT
 // ══════════════════════════════════════════
