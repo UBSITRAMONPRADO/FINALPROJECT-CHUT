@@ -863,9 +863,7 @@ menuSearchQuery = signal<string>('');
     this.imageUploading.set(true);
     this.cartService.uploadImage(file).subscribe({
       next: (result) => {
-        // Store the full URL so <img [src]> resolves correctly even though
-        // the Angular app and the upload server run on different origins.
-        this.updateNewItem('image', `https://finalproject-chut-2.onrender.com${result.url}`);
+        this.updateNewItem('image', result.url); // no more prepending the Render base URL — Cloudinary already returns a full URL
         this.imageUploading.set(false);
       },
       error: (err) => {
