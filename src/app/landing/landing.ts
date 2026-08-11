@@ -19,6 +19,11 @@ export class LandingComponent {
   password = signal('');
   error = signal('');
   loading = signal(false); // NEW — drives the button's "Logging in..." state
+  showPassword = signal(false); // NEW — toggles the password field's visibility
+
+  togglePasswordVisibility(): void {
+    this.showPassword.set(!this.showPassword());
+  }
 
   login(): void {
     if (this.loading()) return; // guard against double-submit while a request is in flight
