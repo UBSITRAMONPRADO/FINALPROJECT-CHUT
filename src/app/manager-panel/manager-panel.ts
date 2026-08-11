@@ -989,7 +989,8 @@ menuSearchQuery = signal<string>('');
     this.newStaff.set({ ...this.newStaff(), [field]: value });
   }
 
-  logout(): void {
-    this.router.navigate(['/']);
+ logout(): void {
+  sessionStorage.removeItem('isManager'); // NEW
+  this.router.navigate(['/']);
   }
 }
