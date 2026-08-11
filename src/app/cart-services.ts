@@ -190,8 +190,16 @@ kioskSettings = signal<KioskSettings>({
 
   // ── STAFF ──
   staffList    = signal<Staff[]>([]);
-  currentStaff = signal<Staff | null>(null);
+  currentStaff = signal<Staff | null>(this.loadStaffFromStorage()); // NEW — restores session on reload
 
+  private loadStaffFromStorage(): Staff | null {
+    try {
+      const raw = sessionStorage.getItem('currentStaff');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null; // corrupted/blocked storage shouldn't crash the app
+    }
+  }
   // Returns the kiosk's active branch when no staff is logged in.
   // Falls back to the first known staff branch or a sensible default.
   private kioskBranch(): Staff['branch'] | string {
@@ -596,10 +604,12 @@ kioskSettings = signal<KioskSettings>({
   //  SESSION METHODS
   setCurrentStaff(staff: Staff): void {
     this.currentStaff.set(staff);
+    sessionStorage.setItem('currentStaff', JSON.stringify(staff)); // NEW
   }
 
   logoutStaff(): void {
     this.currentStaff.set(null);
+    sessionStorage.removeItem('currentStaff'); // NEW
   }
 
   //  BACKUP EXPORT
