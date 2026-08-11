@@ -1,55 +1,85 @@
-<div class="landing-container">
-    <div class="landing-card">
-      <img src="chutchut.jpg" alt="Chut Chut" class="landing-logo" />
-      <h1 class="landing-title">CHUT CHUT</h1>
-      <p class="landing-sub">Wings • Corndog • Bilo-Bilo</p>
+import { Component, signal, inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
+import { CartServices, Staff } from '../cart-services';
 
-      <div class="login-section">
-        <input
-          type="text"
-          class="login-input"
-          placeholder="e.g. EMP001"
-          [value]="staffCode()"
-          (input)="staffCode.set($any($event.target).value)"
-          (keydown.enter)="login()"
-          [disabled]="loading()"
-        />
-       <div class="password-wrapper">
-          <input
-            [type]="showPassword() ? 'text' : 'password'"
-            class="login-input password-input"
-            placeholder="Enter password"
-            [value]="password()"
-            (input)="password.set($any($event.target).value)"
-            (keydown.enter)="login()"
-            [disabled]="loading()"
-          />
-          <button
-            type="button"
-            class="toggle-password-btn"
-            (click)="togglePasswordVisibility()"
-            [disabled]="loading()"
-            [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
-          >
-            @if (showPassword()) {
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                <path d="M12 6c-5 0-9.27 3.11-11 7 .66 1.49 1.68 2.79 2.94 3.8l1.44-1.44C4.3 14.51 3.44 13.35 3 12c1.4-3.02 4.7-5 9-5 1.13 0 2.19.14 3.15.41l1.5-1.5C15.28 5.35 13.7 5 12 5zm7.06 1.2L17.5 8.76A9.9 9.9 0 0 1 21 12c-1.4 3.02-4.7 5-9 5-.57 0-1.12-.04-1.65-.12l-1.65 1.65c1.03.3 2.13.47 3.3.47 5 0 9.27-3.11 11-7a11.6 11.6 0 0 0-3.94-4.8z"/>
-                <path d="M12 9a3 3 0 0 0-2.83 4.02l3.85-3.85A3 3 0 0 0 12 9zM3 3l18 18-1.06 1.06L1.94 4.06 3 3z"/>
-              </svg>
-            } @else {
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                <path d="M12 5c-5 0-9.27 3.11-11 7 1.73 3.89 6 7 11 7s9.27-3.11 11-7c-1.73-3.89-6-7-11-7zm0 12c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"/>
-                <circle cx="12" cy="12" r="2.5"/>
-              </svg>
-            }
-          </button>
-        </div>
-        @if (error()) {
-          <p class="login-error">❌ {{ error() }}</p>
+@Component({
+  selector: 'app-landing',
+  imports: [],
+  templateUrl: './landing.html',
+  styleUrl: './landing.css'
+})
+export class LandingComponent {
+  private router = inject(Router);
+  private http = inject(HttpClient);
+  private cartService = inject(CartServices);
+  private api = 'https://finalproject-chut-2.onrender.com/api';
+
+  staffCode = signal('');
+  password = signal('');
+  error = signal('');
+  loading = signal(false); // NEW — drives the button's "Logging in..." state
+  showPassword = signal(false); // NEW — toggles the password field's visibility
+
+  togglePasswordVisibility(): void {
+    this.showPassword.set(!this.showPassword());
+  }
+
+  login(): void {
+    if (this.loading()) return; // guard against double-submit while a request is in flight
+
+    this.error.set('');
+    const code = this.staffCode().trim();
+    const pass = this.password();
+
+    if (!pass) {
+      this.error.set('Please enter your password.');
+      return;
+    }
+
+    this.loading.set(true);
+
+    if (!code) {
+      // No staff code entered → attempt Manager login
+      this.http.post<{ success: boolean; role: string; message?: string }>(
+        `${this.api}/login/manager`,
+        { password: pass }
+      ).subscribe({
+        next: (res) => {
+          if (res.success) {
+            this.router.navigate(['/manager-panel']);
+          } else {
+            this.loading.set(false);
+          }
+        },
+        error: (err) => {
+          this.error.set(err.error?.message || 'Incorrect manager password');
+          this.loading.set(false);
         }
-        <button class="login-btn" (click)="login()" [disabled]="loading()">
-          {{ loading() ? 'Logging in…' : 'Login' }}
-        </button>
-      </div>
-    </div>
-  </div>
+      });
+    } else {
+      // Staff code entered → attempt Employee login
+      this.http.post<{ success: boolean; role: string; staff?: Staff; message?: string }>(
+        `${this.api}/login/staff`,
+        { staffCode: code, password: pass }
+      ).subscribe({
+        next: (res) => {
+          if (res.success && res.staff) {
+            this.cartService.setCurrentStaff(res.staff);
+            this.router.navigate(['/dashboard']);
+          } else {
+            this.loading.set(false);
+          }
+        },
+        error: (err) => {
+          this.error.set(err.error?.message || 'Incorrect staff code or password');
+          this.loading.set(false);
+        }
+      });
+    }
+    // Note: loading is intentionally left `true` on success — the page is
+    // about to navigate away, so there's no need to reset it, and leaving
+    // it true keeps the button showing "Logging in..." right up to the
+    // route change instead of flickering back to normal for a split second.
+  }
+}
