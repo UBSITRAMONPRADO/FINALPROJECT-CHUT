@@ -41,12 +41,13 @@ export class LandingComponent {
 
     if (!code) {
       // No staff code entered → attempt Manager login
-      this.http.post<{ success: boolean; role: string; message?: string }>(
+     this.http.post<{ success: boolean; role: string; message?: string }>(
         `${this.api}/login/manager`,
         { password: pass }
       ).subscribe({
         next: (res) => {
           if (res.success) {
+            sessionStorage.setItem('isManager', 'true'); // NEW — persists manager session across reloads
             this.router.navigate(['/manager-panel']);
           } else {
             this.loading.set(false);
