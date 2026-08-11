@@ -6,8 +6,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const app = express();
@@ -112,34 +110,6 @@ function requireAdminKey(req, res, next) {
   }
   next();
 }
-
-// ── IMAGE UPLOADS ──
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-
-// Serves uploaded images statically at http://localhost:3000/uploads/<filename>
-app.use('/uploads', express.static(uploadsDir));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '-');
-    cb(null, `${base}-${Date.now()}${ext}`); // unique name, avoids overwriting
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB cap
-  fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp/;
-    const extOk  = allowed.test(path.extname(file.originalname).toLowerCase());
-    const mimeOk = allowed.test(file.mimetype);
-    if (extOk && mimeOk) return cb(null, true);
-    cb(new Error('Only image files (jpg, png, gif, webp) are allowed'));
-  }
-});
 
 // ── CONNECT TO MONGODB ──
 mongoose.connect(process.env.MONGODB_URI)
@@ -1040,13 +1010,34 @@ const menuSeedData = [
 // ══════════════════════════════════════════
 //  IMAGE UPLOAD ENDPOINT
 // ══════════════════════════════════════════
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: 'chutchut-menu',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp']
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 
 app.post('/api/upload', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).send({ error: 'No file uploaded' });
   console.log('Image uploaded:', req.file.filename);
   res.status(201).send({
     filename: req.file.filename,
-    url: `/uploads/${req.file.filename}`
+    url: req.file.path
   });
 });
 
