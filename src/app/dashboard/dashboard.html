@@ -71,42 +71,96 @@
             }
           }
         </div>
-        <div class="breakdown-grid">
+       <div class="breakdown-grid">
           <div class="breakdown-card">
-            <h2><img src="transaction.png" alt="Transaction" class="icon-h2"> Transaction Breakdown</h2>
+            <h2><img src="transact.png" alt="Transaction" class="icon-h2"> Transaction Breakdown</h2>
             <div class="breakdown-items">
               <div class="breakdown-item">
-                <span><img src="dine-in.png" alt="Dine In" class="icon-sm"> Dine In</span>
-                <span class="breakdown-count">{{ transactionBreakdown().dineIn }} orders</span>
+                <span class="breakdown-item-left">
+                  <img src="dine-in.png" alt="Dine In" class="icon-sm">
+                  <span class="breakdown-name-block">
+                    <span class="breakdown-name">Dine In</span>
+                    <span class="breakdown-count">{{ orderLabel(transactionTotals().dineInCount) }}</span>
+                  </span>
+                </span>
+                <span class="breakdown-amount">&#8369;{{ transactionTotals().dineIn | number:'1.2-2' }}</span>
               </div>
               <div class="breakdown-item">
-                <span><img src="takeout.png" alt="Take Out" class="icon-sm"> Take Out</span>
-                <span class="breakdown-count">{{ transactionBreakdown().takeOut }} orders</span>
+                <span class="breakdown-item-left">
+                  <img src="takeout.png" alt="Take Out" class="icon-sm">
+                  <span class="breakdown-name-block">
+                    <span class="breakdown-name">Take Out</span>
+                    <span class="breakdown-count">{{ orderLabel(transactionTotals().takeOutCount) }}</span>
+                  </span>
+                </span>
+                <span class="breakdown-amount">&#8369;{{ transactionTotals().takeOut | number:'1.2-2' }}</span>
               </div>
               <div class="breakdown-item">
-                <span><img src="grab.png" alt="Grab" class="icon-sm"> Grab</span>
-                <span class="breakdown-count">{{ transactionBreakdown().grab }} orders</span>
+                <span class="breakdown-item-left">
+                  <img src="grab.png" alt="Grab" class="icon-sm">
+                  <span class="breakdown-name-block">
+                    <span class="breakdown-name">Grab</span>
+                    <span class="breakdown-count">{{ orderLabel(transactionTotals().grabCount) }}</span>
+                  </span>
+                </span>
+                <span class="breakdown-amount">&#8369;{{ transactionTotals().grab | number:'1.2-2' }}</span>
               </div>
             </div>
+            <div class="breakdown-total-row">
+              <span class="breakdown-total-text">
+                <span class="breakdown-total-label">Total Transaction Sales</span>
+                <span class="breakdown-total-count">{{ orderLabel(transactionTotals().totalCount) }}</span>
+              </span>
+              <span class="breakdown-total-amount">&#8369;{{ transactionTotals().total | number:'1.2-2' }}</span>
+            </div>
           </div>
-  
+
           <div class="breakdown-card">
-            <h2><img src="transaction.png" alt="Payment" class="icon-h2"> Payment Breakdown</h2>
+            <h2><img src="pay.png" alt="Payment" class="icon-h2"> Payment Breakdown</h2>
             <div class="breakdown-items">
               <div class="breakdown-item">
-                <span><img src="cash.png" alt="Cash" class="icon-sm"> Cash</span>
-                <span class="breakdown-count">{{ paymentBreakdown().cash }} orders</span>
+                <span class="breakdown-item-left">
+                  <img src="cas.png" alt="Cash" class="icon-sm">
+                  <span class="breakdown-name-block">
+                    <span class="breakdown-name">Cash</span>
+                    <span class="breakdown-count">{{ orderLabel(paymentTotals().cashCount) }}</span>
+                  </span>
+                </span>
+                <span class="breakdown-amount">&#8369;{{ paymentTotals().cash | number:'1.2-2' }}</span>
               </div>
               <div class="breakdown-item">
-                <span><img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm"> Gcash/Maya</span>
-                <span class="breakdown-count">{{ paymentBreakdown().gcashmaya }} orders</span>
+                <span class="breakdown-item-left">
+                  <img src="gcash.jpg" alt="Gcash" class="icon-sm">
+                  <span class="breakdown-name-block">
+                    <span class="breakdown-name">GCash / Maya</span>
+                    <span class="breakdown-count">{{ orderLabel(paymentTotals().gcashCount) }}</span>
+                  </span>
+                </span>
+                <span class="breakdown-amount">&#8369;{{ paymentTotals().gcash | number:'1.2-2' }}</span>
               </div>
+              <div class="breakdown-item">
+                <span class="breakdown-item-left">
+                  <img src="grab-pay.png" alt="GrabPay" class="icon-sm">
+                  <span class="breakdown-name-block">
+                    <span class="breakdown-name">GrabPay</span>
+                    <span class="breakdown-count">{{ orderLabel(paymentTotals().grabpayCount) }}</span>
+                  </span>
+                </span>
+                <span class="breakdown-amount">&#8369;{{ paymentTotals().grabpay | number:'1.2-2' }}</span>
+              </div>
+            </div>
+            <div class="breakdown-total-row">
+              <span class="breakdown-total-text">
+                <span class="breakdown-total-label">Total Payment Received</span>
+                <span class="breakdown-total-count">{{ orderLabel(paymentTotals().totalCount) }}</span>
+              </span>
+              <span class="breakdown-total-amount">&#8369;{{ paymentTotals().total | number:'1.2-2' }}</span>
             </div>
           </div>
         </div>
       </div>
     }
-  
+
     <!-- NEW ORDER TAB — now a POS-style flow: mode select → chip grid + floating dock + drawer -->
     @if (activeTab() === 'new-order') {
       <div class="tab-content">
@@ -375,8 +429,8 @@
                     </div>
                     <p class="pos-pay-label">Select Payment</p>
                     <div class="pos-pay-cards">
-                     <button class="pos-pay-card cash" (click)="selectPayment('Cash')">
-                        <img src="cash.png" alt="Cash" class="pos-pay-card-icon">
+                    <button class="pos-pay-card cash" (click)="selectPayment('Cash')">
+                      <img src="cas.png" alt="Cash" class="pos-pay-card-icon">
                         <span class="pos-pay-card-text">
                           <span class="pos-pay-card-title">Cash</span>
                           <span class="pos-pay-card-sub">Pay with cash upon delivery</span>
@@ -384,10 +438,10 @@
                         <span class="pos-pay-card-chevron">›</span>
                       </button>
                       <button class="pos-pay-card gcash" (click)="selectPayment('Online Payment')">
-                        <img src="gcash-maya.jpg" alt="GCash / Maya" class="pos-pay-card-icon">
+                        <img src="gcash-maya.jpg" alt="GCash" class="pos-pay-card-icon">
                         <span class="pos-pay-card-text">
-                          <span class="pos-pay-card-title">GCash / Maya</span>
-                          <span class="pos-pay-card-sub">Pay securely using GCash or Maya</span>
+                          <span class="pos-pay-card-title">GCash</span>
+                          <span class="pos-pay-card-sub">Pay securely using GCash </span>
                         </span>
                         <span class="pos-pay-card-chevron">›</span>
                       </button>
