@@ -25,7 +25,7 @@ export class ManagerPanelComponent implements OnDestroy {
   errorMsg   = signal('');
   imageUploading = signal(false);
   allTransactionModes = ['Dine In', 'Take Out', 'Grab'];
-  allPaymentModes     = ['Cash', 'Gcash/Maya'];
+  allPaymentModes     = ['Cash', 'Gcash','Grabpay'];
   
   branches = ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'];
   expandedBranch = signal<string | null>(this.branches[0]); // first branch open by default
@@ -186,13 +186,53 @@ menuSearchQuery = signal<string>('');
     };
   });
 
-  paymentBreakdown = computed(() => {
+ paymentBreakdown = computed(() => {
     const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
     return {
-      cash:   orders.filter(o => o.paymentMode === 'Cash').length,
-      gcashmaya: orders.filter(o => o.paymentMode === 'Gcash/Maya' || o.paymentMode === 'Online Payment').length,
+      cash:      orders.filter(o => o.paymentMode === 'Cash').length,
+      gcash: orders.filter(o => o.paymentMode === 'Gcash' || o.paymentMode === 'Online Payment').length,
+      grabpay:   orders.filter(o => o.paymentMode === 'Grabpay').length,
     };
   });
+
+  // ── NEW: peso totals for the enhanced breakdown cards ──
+  transactionTotals = computed(() => {
+    const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
+    const dineInOrders  = orders.filter(o => o.transactionMode === 'Dine In');
+    const takeOutOrders = orders.filter(o => o.transactionMode === 'Take Out');
+    const grabOrders    = orders.filter(o => o.transactionMode === 'Grab');
+    const dineIn  = dineInOrders.reduce((sum, o) => sum + o.total, 0);
+    const takeOut = takeOutOrders.reduce((sum, o) => sum + o.total, 0);
+    const grab    = grabOrders.reduce((sum, o) => sum + o.total, 0);
+    return {
+      dineIn,  dineInCount:  dineInOrders.length,
+      takeOut, takeOutCount: takeOutOrders.length,
+      grab,    grabCount:    grabOrders.length,
+      total: dineIn + takeOut + grab,
+      totalCount: dineInOrders.length + takeOutOrders.length + grabOrders.length
+    };
+  });
+
+  paymentTotals = computed(() => {
+    const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
+    const cashOrders    = orders.filter(o => o.paymentMode === 'Cash');
+    const gcashOrders   = orders.filter(o => o.paymentMode === 'Gcash/Maya' || o.paymentMode === 'Online Payment');
+    const grabpayOrders = orders.filter(o => o.paymentMode === 'Grabpay');
+    const cash    = cashOrders.reduce((sum, o) => sum + o.total, 0);
+    const gcash   = gcashOrders.reduce((sum, o) => sum + o.total, 0);
+    const grabpay = grabpayOrders.reduce((sum, o) => sum + o.total, 0);
+    return {
+      cash,    cashCount:    cashOrders.length,
+      gcash,   gcashCount:   gcashOrders.length,
+      grabpay, grabpayCount: grabpayOrders.length,
+      total: cash + gcash + grabpay,
+      totalCount: cashOrders.length + gcashOrders.length + grabpayOrders.length
+    };
+  });
+
+  orderLabel(count: number): string {
+    return count === 1 ? '1 order' : `${count} orders`;
+  }
 
   // ── CANCEL / UNCANCEL — backend-persisted via order.status ──
   cancelOrder(orderId: string): void {
