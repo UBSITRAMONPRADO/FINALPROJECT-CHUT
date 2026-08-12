@@ -167,6 +167,74 @@
   .inventory-total { font-weight: 900; color: #CC0000; font-size: 0.9rem; }
   
   /* ── BREAKDOWN ── */
+  .breakdown-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.breakdown-name-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.breakdown-name {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.breakdown-item .breakdown-count {
+  font-size: 0.8rem;
+  color: #8a8a8a;
+  font-weight: 400;
+}
+
+.breakdown-amount {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #CC0000;
+  white-space: nowrap;
+}
+
+.breakdown-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: #FFF6DE;
+  border-radius: 14px;
+}
+
+.breakdown-total-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.breakdown-total-label {
+  font-weight: 700;
+  color: #1a1a1a;
+  font-size: 0.95rem;
+}
+
+.breakdown-total-count {
+  font-size: 0.78rem;
+  color: #8a8a8a;
+}
+
+.breakdown-total-amount {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #CC0000;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .breakdown-amount { font-size: 1rem; }
+  .breakdown-total-amount { font-size: 1.15rem; }
+}
   .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   
   .breakdown-card {
