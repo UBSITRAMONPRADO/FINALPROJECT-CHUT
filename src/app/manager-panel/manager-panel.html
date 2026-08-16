@@ -1,38 +1,56 @@
 <div class="app-shell">
 
+    <!-- ══ MOBILE HEADER — hamburger + brand, shown only below 768px ══ -->
+    <header class="mobile-header">
+      <button class="hamburger-btn" aria-label="Open navigation menu" (click)="toggleSidebar()">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="mobile-header-brand">
+        <img src="chutchut.jpg" alt="Chut Chut" class="mobile-header-logo" />
+        <span>CHUT CHUT</span>
+      </div>
+      <div class="mobile-header-spacer"></div>
+    </header>
+
+    <!-- ══ OVERLAY — behind the drawer on mobile, closes it on click ══ -->
+    @if (sidebarOpen()) {
+      <div class="sidebar-overlay" (click)="closeSidebar()"></div>
+    }
+
     <!-- ══ SIDEBAR ══ -->
-    <aside class="sidebar">
+    <aside class="sidebar" [class.open]="sidebarOpen()">
       <div class="sidebar-brand">
         <img src="chutchut.jpg" alt="Chut Chut" class="sidebar-logo" />
         <div class="sidebar-brand-text">
           <h1>CHUT CHUT</h1>
           <p>Fried Chicken — Bay Pack</p>
         </div>
+        <button class="sidebar-close-btn" aria-label="Close navigation menu" (click)="closeSidebar()">✕</button>
       </div>
 
       <nav class="sidebar-nav">
-        <button class="nav-item" [class.active]="activeTab() === 'dashboard'" (click)="activeTab.set('dashboard')">
+        <button class="nav-item" [class.active]="activeTab() === 'dashboard'" (click)="selectTab('dashboard')">
           <span class="nav-icon">📊</span><span>Dashboard</span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'history'" (click)="activeTab.set('history')">
+        <button class="nav-item" [class.active]="activeTab() === 'history'" (click)="selectTab('history')">
           <span class="nav-icon">📈</span><span>Sales History</span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'transactions'" (click)="activeTab.set('transactions')">
+        <button class="nav-item" [class.active]="activeTab() === 'transactions'" (click)="selectTab('transactions')">
           <span class="nav-icon">💳</span><span>Transactions </span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'menu'" (click)="activeTab.set('menu')">
+        <button class="nav-item" [class.active]="activeTab() === 'menu'" (click)="selectTab('menu')">
           <span class="nav-icon">🍗</span><span>Menu</span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'bestseller'" (click)="activeTab.set('bestseller')">
+        <button class="nav-item" [class.active]="activeTab() === 'bestseller'" (click)="selectTab('bestseller')">
         <span class="nav-icon">🏆</span><span>Best Seller</span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'staff'" (click)="activeTab.set('staff')">
+        <button class="nav-item" [class.active]="activeTab() === 'staff'" (click)="selectTab('staff')">
           <span class="nav-icon">👥</span><span>Staff</span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'settings'" (click)="activeTab.set('settings')">
+        <button class="nav-item" [class.active]="activeTab() === 'settings'" (click)="selectTab('settings')">
           <span class="nav-icon">⚙️</span><span>Settings</span>
         </button>
-        <button class="nav-item" [class.active]="activeTab() === 'accounts'" (click)="activeTab.set('accounts')">
+        <button class="nav-item" [class.active]="activeTab() === 'accounts'" (click)="selectTab('accounts')">
           <span class="nav-icon">🔐</span><span>Accounts</span>
         </button>
       </nav>
@@ -166,7 +184,7 @@
 
           <div class="breakdown-grid">
             <div class="breakdown-card">
-              <h2><img src="transaction.png" alt="Transaction" class="icon-h2"> Transaction Breakdown</h2>
+              <h2><img src="transact.png" alt="Transaction" class="icon-h2"> Transaction Breakdown</h2>
               <div class="breakdown-items">
                 <div class="breakdown-item">
                   <span class="breakdown-item-left">
@@ -209,11 +227,11 @@
             </div>
 
             <div class="breakdown-card">
-              <h2><img src="transaction.png" alt="Payment" class="icon-h2"> Payment Breakdown</h2>
+              <h2><img src="pay.png" alt="Payment" class="icon-h2"> Payment Breakdown</h2>
               <div class="breakdown-items">
                 <div class="breakdown-item">
                   <span class="breakdown-item-left">
-                    <img src="cash.png" alt="Cash" class="icon-sm">
+                    <img src="cas.png" alt="Cash" class="icon-sm">
                     <span class="breakdown-name-block">
                       <span class="breakdown-name">Cash</span>
                       <span class="breakdown-count">{{ orderLabel(paymentTotals().cashCount) }}</span>
@@ -223,9 +241,9 @@
                 </div>
                 <div class="breakdown-item">
                   <span class="breakdown-item-left">
-                    <img src="gcash-maya.jpg" alt="Gcash/Maya" class="icon-sm">
+                    <img src="gcash.jpg" alt="Gcash" class="icon-sm">
                     <span class="breakdown-name-block">
-                      <span class="breakdown-name">GCash / Maya</span>
+                      <span class="breakdown-name">GCash</span>
                       <span class="breakdown-count">{{ orderLabel(paymentTotals().gcashCount) }}</span>
                     </span>
                   </span>
@@ -608,9 +626,6 @@
                     (input)="updateNewItem('description', $any($event.target).value)" placeholder="Short description" />
                 </div>
 
-                <!-- VARIANT GROUPS EDITOR — mirrors MenuItem.variantGroups exactly
-                    (Sauce, Spice Level, Extras...), each single/multi choice,
-                    optionally required, with per-option price add-ons. -->
                 <div class="form-group full-width">
                   <div class="variant-editor-header">
                     <label>Variant Groups <span class="form-hint">(e.g. Sauce, Spice Level, Extras — leave empty if this item has none)</span></label>
@@ -672,7 +687,6 @@
                 <div class="menu-card-info">
                   <p class="menu-card-name">{{ item.name }}</p>
                   <p class="menu-card-cat">{{ item.category }}</p>
-                  <!-- after -->
                   <p class="menu-card-price" [style.color]="categoryColor(item.category)">
                     ₱{{ priceForBranch(item, activeMenuBranch()) }}
                   </p>
@@ -697,13 +711,13 @@
         </div>
       }
 
-      <!-- ══ BEST SELLERS TAB ══ -->
+      <!-- ══ BEST SELLERS TAB — redesigned layout ══ -->
       @if (activeTab() === 'bestseller') {
       <div class="tab-content">
         <div class="history-toolbar">
           <div class="page-header-text">
             <h2>Best Sellers</h2>
-            <p class="page-subtitle">Monitor your top-performing menu items across all branches</p>
+            <p class="page-subtitle">Monitor your top-performing menu items across all branches.</p>
           </div>
           <div class="history-controls">
             <div class="view-toggle">
@@ -726,7 +740,7 @@
           <p class="empty-msg">No sales yet for this period.</p>
         } @else {
 
-          <!-- KPI CARDS -->
+          <!-- KPI CARDS — Top Product / Total Quantity Sold / Best Branch / Total Sales -->
           <div class="stat-cards">
             <div class="stat-card">
               <div class="stat-icon gold-bg">🏆</div>
@@ -755,111 +769,85 @@
               </div>
             </div>
             <div class="stat-card">
-              @if (bestSellerGrowth(); as growth) {
-                <div class="stat-icon"
-                  [class.green-bg]="growth.percent !== null && growth.percent >= 0"
-                  [class.red-bg]="growth.percent !== null && growth.percent < 0"
-                  [class.dark-bg]="growth.percent === null">
-                  {{ growth.percent === null ? '—' : (growth.percent >= 0 ? '📈' : '📉') }}
-                </div>
-                <div>
-                  <p class="stat-label">Growth</p>
-                  <p class="stat-value">{{ growth.percent === null ? '—' : (growth.percent >= 0 ? '+' : '') + growth.percent + '%' }}</p>
-                  <p class="stat-sub">{{ growth.label }}</p>
-                </div>
-              } @else {
-                <div class="stat-icon dark-bg">—</div>
-                <div>
-                  <p class="stat-label">Growth</p>
-                  <p class="stat-value">—</p>
-                  <p class="stat-sub">Not enough data yet</p>
+              <div class="stat-icon green-bg">📈</div>
+              <div>
+                <p class="stat-label">Total Sales</p>
+                <p class="stat-value">₱{{ bestSellerTotalSales() | number:'1.2-2' }}</p>
+                <p class="stat-sub">{{ bestSellerView() === 'alltime' ? 'All-time total' : (bestSellerView() + ' total') }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- TOP PERFORMING MENU ITEMS — horizontal ranked strip -->
+          <div class="history-card bs-top-items-card">
+            <div class="bs-section-header">
+              <h3>Top Performing Menu Items</h3>
+              <button class="bs-view-all-link" (click)="openFullReport()">View All →</button>
+            </div>
+            <div class="bs-top-items-row">
+              @for (item of bestSellers(); track item.name; let i = $index) {
+                <div class="bs-top-item-card">
+                  <span class="bs-grid-rank" [class.gold]="i===0" [class.silver]="i===1" [class.bronze]="i===2">{{ i + 1 }}</span>
+                  <img [src]="bestSellerImage(item.name)" [alt]="item.name" class="bs-top-item-img" />
+                  <p class="bs-top-item-name">{{ item.name }}</p>
+                  <p class="bs-top-item-qty">{{ item.qty }} sold</p>
                 </div>
               }
             </div>
           </div>
 
-          <!-- FEATURED TOP PRODUCT + SALES TREND -->
-          @if (bestSellers()[0]; as topSeller) {
-            <div class="bs-feature-row">
+          <!-- BRANCH PERFORMANCE + BEST SELLERS SUMMARY, side by side -->
+          <div class="bs-lower-grid">
 
-              <div class="bs-featured-card">
-                <span class="bs-top-badge">🏆 Top Performer</span>
-                <img [src]="bestSellerImage(topSeller.name)" [alt]="topSeller.name" class="bs-featured-img" />
-                <h3 class="bs-featured-name">{{ topSeller.name }}</h3>
-                <p class="bs-featured-branches">Available in {{ topSeller.branches.join(', ') }}</p>
-                <div class="bs-featured-stats">
-                  <div class="bs-featured-stat">
-                    <p class="bs-featured-stat-value">{{ topSeller.qty }}</p>
-                    <p class="bs-featured-stat-label">Total Sold</p>
-                  </div>
-                  <div class="bs-featured-stat">
-                    <p class="bs-featured-stat-value">{{ topSeller.branches.length }}</p>
-                    <p class="bs-featured-stat-label">Branches</p>
-                  </div>
-                </div>
-                <a class="bs-view-analytics-btn" href="#bsTrendCard">📊 View Sales Trend</a>
+            <div class="history-card bs-branch-card">
+              <div class="bs-section-header">
+                <h3>Branch Performance</h3>
+                <span class="bs-period-tag">{{ bestSellerView() === 'alltime' ? 'All-Time' : bestSellerView() }}</span>
               </div>
-
-              <div class="chart-card bs-trend-card" id="bsTrendCard">
-                <h3>Sales Trend — Last 7 Days</h3>
-                @if (topSellerTrend().points.length === 0) {
-                  <p class="empty-msg">Not enough data yet.</p>
-                } @else {
-                  <svg [attr.viewBox]="'0 0 ' + topSellerTrend().w + ' ' + topSellerTrend().h" class="trend-svg">
-                    <path [attr.d]="topSellerTrend().areaPath" class="trend-area"></path>
-                    <path [attr.d]="topSellerTrend().linePath" class="trend-line"></path>
-                    @for (p of topSellerTrend().points; track p.date) {
-                      <circle [attr.cx]="p.x" [attr.cy]="p.y" r="3.5" class="trend-dot"></circle>
-                    }
-                  </svg>
-                  <div class="trend-x-labels">
-                    @for (p of topSellerTrend().labels; track p.date) {
-                      <span>{{ p.short }}</span>
-                    }
+              <div class="bs-branch-list">
+                @for (b of branchPerformance(); track b.branch; let i = $index) {
+                  <div class="bs-branch-row">
+                    <span class="bs-branch-rank">{{ i + 1 }}</span>
+                    <span class="bs-branch-name">🏬 {{ b.branch }}</span>
+                    <div class="bs-branch-bar-track">
+                      <div class="bs-branch-bar-fill" [style.width.%]="b.percent"></div>
+                    </div>
+                    <span class="bs-branch-percent">{{ b.percent }}%</span>
+                    <span class="bs-branch-qty">{{ b.qty }} sold</span>
                   </div>
                 }
               </div>
-
             </div>
-          }
 
-          <!-- BRANCH PERFORMANCE -->
-          <div class="history-card bs-branch-card">
-            <div class="bs-section-header">
-              <h3>Branch Performance</h3>
-              <span class="bs-period-tag">{{ bestSellerView() === 'alltime' ? 'All-Time' : bestSellerView() }}</span>
-            </div>
-            <div class="bs-branch-list">
-              @for (b of branchPerformance(); track b.branch; let i = $index) {
-                <div class="bs-branch-row">
-                  <span class="bs-branch-rank">{{ i + 1 }}</span>
-                  <span class="bs-branch-name">🏬 {{ b.branch }}</span>
-                  <div class="bs-branch-bar-track">
-                    <div class="bs-branch-bar-fill" [style.width.%]="b.percent"></div>
-                  </div>
-                  <span class="bs-branch-percent">{{ b.percent }}%</span>
-                  <span class="bs-branch-qty">{{ b.qty }} sold</span>
+            <div class="history-card bs-summary-card">
+              <div class="bs-section-header">
+                <h3>Best Sellers Summary</h3>
+                <span class="bs-period-tag">{{ bestSellersSummary().length }} item{{ bestSellersSummary().length > 1 ? 's' : '' }}</span>
+              </div>
+              <div class="bs-summary-table">
+                <div class="bs-summary-row bs-summary-head">
+                  <span>Rank</span><span>Menu Item</span><span>Sold</span><span>Sales</span><span>% of Total</span>
                 </div>
-              }
+                @for (row of bestSellersSummary(); track row.name) {
+                  <div class="bs-summary-row">
+                    <span class="bs-summary-rank">{{ row.rank }}</span>
+                    <span class="bs-summary-name">
+                      <img [src]="bestSellerImage(row.name)" [alt]="row.name" class="bs-summary-thumb" />
+                      {{ row.name }}
+                    </span>
+                    <span>{{ row.qty }}</span>
+                    <span>₱{{ row.sales | number:'1.2-2' }}</span>
+                    <span class="bs-summary-percent">{{ row.percent }}%</span>
+                  </div>
+                }
+              </div>
             </div>
+
           </div>
 
-          <!-- TOP SELLERS GRID -->
-          <div class="history-card">
-            <div class="bs-section-header">
-              <h3>Top Sellers</h3>
-              <span class="bs-period-tag">{{ bestSellers().length }} item{{ bestSellers().length > 1 ? 's' : '' }}</span>
-            </div>
-            <div class="bs-grid">
-              @for (item of bestSellers(); track item.name; let i = $index) {
-                <div class="bs-grid-card">
-                  <span class="bs-grid-rank" [class.gold]="i===0" [class.silver]="i===1" [class.bronze]="i===2">{{ i + 1 }}</span>
-                  <img [src]="bestSellerImage(item.name)" [alt]="item.name" class="bs-grid-img" />
-                  <p class="bs-grid-name">{{ item.name }}</p>
-                  <p class="bs-grid-qty">{{ item.qty }} sold</p>
-                </div>
-              }
-            </div>
+          <!-- VIEW FULL REPORT -->
+          <div class="bs-full-report-cta">
+            <button class="bs-full-report-btn" (click)="openFullReport()">📊 View Full Report</button>
           </div>
 
         }
@@ -1044,4 +1032,131 @@
         </div>
       }
     </main>
+
+    <!-- ══ BEST SELLERS FULL REPORT MODAL ══ -->
+    @if (showFullReport()) {
+      <div class="report-modal-backdrop" (click)="closeFullReport()"></div>
+      <div class="report-modal" role="dialog" aria-modal="true" aria-label="Best Sellers Full Report">
+        <div class="report-modal-header">
+          <div class="report-modal-title-block">
+            <span class="report-modal-icon">📄</span>
+            <div>
+              <h2>Best Sellers Full Report</h2>
+              <p>Detailed report of top-performing menu items.</p>
+            </div>
+          </div>
+          <div class="report-modal-actions">
+            <button class="report-action-btn pdf" (click)="exportReportPDF()" [disabled]="pdfExporting()">
+              📕 {{ pdfExporting() ? 'Exporting…' : 'Export PDF' }}
+            </button>
+            <button class="report-action-btn excel" (click)="exportReportExcel()" [disabled]="excelExporting()">
+              📗 {{ excelExporting() ? 'Exporting…' : 'Export Excel' }}
+            </button>
+            <button class="report-modal-close" aria-label="Close report" (click)="closeFullReport()">✕</button>
+          </div>
+        </div>
+
+        <div class="report-modal-body">
+          <div class="report-doc">
+
+            <div class="report-doc-header">
+              <div class="report-doc-brand">
+                <img src="chutchut.jpg" alt="Chut Chut" />
+                <div>
+                  <p class="report-doc-title">BEST SELLERS REPORT</p>
+                  <p class="report-doc-period">{{ bestSellerPeriodLabel() }}</p>
+                  <p class="report-doc-generated">Generated on: {{ reportGeneratedAt() }}</p>
+                </div>
+              </div>
+              <div class="report-doc-totals">
+                <div>
+                  <p class="report-doc-total-label">Total Sales</p>
+                  <p class="report-doc-total-value sales">₱{{ bestSellerTotalSales() | number:'1.2-2' }}</p>
+                </div>
+                <div>
+                  <p class="report-doc-total-label">Total Quantity Sold</p>
+                  <p class="report-doc-total-value">{{ bestSellerTotalQty() }}</p>
+                </div>
+                <div>
+                  <p class="report-doc-total-label">Total Items</p>
+                  <p class="report-doc-total-value">{{ bestSellers().length }}</p>
+                </div>
+              </div>
+            </div>
+
+            @if (bestSellers().length === 0) {
+              <p class="empty-msg">No sales data available for this period.</p>
+            } @else {
+
+              <div class="report-section">
+                <h3>1. Top Performing Menu Items</h3>
+                <div class="report-table">
+                  <div class="report-table-row report-table-head">
+                    <span>Rank</span><span>Menu Item</span><span>Quantity Sold</span><span>Total Sales</span><span>% of Total</span>
+                  </div>
+                  @for (row of bestSellersSummary(); track row.name) {
+                    <div class="report-table-row">
+                      <span>{{ row.rank }}</span>
+                      <span>{{ row.name }}</span>
+                      <span>{{ row.qty }}</span>
+                      <span>₱{{ row.sales | number:'1.2-2' }}</span>
+                      <span>{{ row.percent }}%</span>
+                    </div>
+                  }
+                  <div class="report-table-row report-table-total">
+                    <span></span><span>TOTAL</span>
+                    <span>{{ bestSellerTotalQty() }}</span>
+                    <span>₱{{ bestSellerTotalSales() | number:'1.2-2' }}</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="report-section">
+                <h3>2. Branch Performance</h3>
+                <div class="report-table">
+                  <div class="report-table-row report-table-head">
+                    <span>Rank</span><span>Branch</span><span>Quantity Sold</span><span>Total Sales</span><span>% of Total</span>
+                  </div>
+                  @for (b of branchPerformance(); track b.branch; let i = $index) {
+                    <div class="report-table-row">
+                      <span>{{ i + 1 }}</span>
+                      <span>{{ b.branch }}</span>
+                      <span>{{ b.qty }}</span>
+                      <span>₱{{ b.sales | number:'1.2-2' }}</span>
+                      <span>{{ b.percent }}%</span>
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <div class="report-section">
+                <h3>3. Sales Distribution</h3>
+                <div class="report-distribution">
+                  <div class="donut" [style.background]="salesDistributionGradient()">
+                    <div class="donut-hole">
+                      <span class="donut-total">₱{{ bestSellerTotalSales() | number:'1.0-0' }}</span>
+                      <span class="donut-total-label">Total</span>
+                    </div>
+                  </div>
+                  <ul class="report-distribution-legend">
+                    @for (slice of salesDistribution(); track slice.name) {
+                      <li><span class="dot" [style.background]="slice.color"></span> {{ slice.name }} <strong>{{ slice.percent }}%</strong></li>
+                    }
+                  </ul>
+                </div>
+              </div>
+
+            }
+
+            <p class="report-doc-footer">This report is system generated and does not require signature.</p>
+          </div>
+        </div>
+
+        <div class="report-modal-footer">
+          <button class="cancel-btn" (click)="closeFullReport()">Close</button>
+        </div>
+      </div>
+    }
+
   </div>
