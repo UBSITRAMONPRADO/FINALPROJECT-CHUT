@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
+import { Component, inject, signal, computed, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import {CartServices, MenuItem, Staff, OrderHistoryDay, SelectedOption, VariantGroup, BranchPricing, optionsKey,
@@ -26,9 +26,29 @@ export class ManagerPanelComponent implements OnDestroy {
   imageUploading = signal(false);
   allTransactionModes = ['Dine In', 'Take Out', 'Grab'];
   allPaymentModes     = ['Cash', 'Gcash','Grabpay'];
-  
+
   branches = ['Harrison Bazaar', 'Pines Arcade', 'Porta Vaga'];
   expandedBranch = signal<string | null>(this.branches[0]); // first branch open by default
+
+  // ══════════════════════════════════════════
+  // RESPONSIVE SIDEBAR — hamburger / mobile drawer
+  // ══════════════════════════════════════════
+  sidebarOpen = signal(false);
+
+  toggleSidebar(): void {
+    this.sidebarOpen.set(!this.sidebarOpen());
+  }
+
+  closeSidebar(): void {
+    this.sidebarOpen.set(false);
+  }
+
+  // Selecting a nav item closes the mobile drawer too, so the page underneath
+  // isn't left covered after navigating.
+  selectTab(tab: string): void {
+    this.activeTab.set(tab);
+    this.closeSidebar();
+  }
 
   getBranchPrice(branch: string): number {
   return (this.newItem().branchPricing ?? []).find(bp => bp.branch === branch)?.price ?? 0;
@@ -195,7 +215,7 @@ menuSearchQuery = signal<string>('');
     };
   });
 
-  // ── NEW: peso totals for the enhanced breakdown cards ──
+  // ── peso totals for the enhanced breakdown cards ──
   transactionTotals = computed(() => {
     const orders = this.cartService.completedOrders().filter(o => o.status !== 'cancelled');
     const dineInOrders  = orders.filter(o => o.transactionMode === 'Dine In');
@@ -306,14 +326,7 @@ menuSearchQuery = signal<string>('');
     return result;
   });
 
-  // ── SALES HISTORY OVERVIEW — powers the stat cards, charts, and
-  // transactions table at the top of the Sales History tab. These are
-  // deliberately based on the FULL loaded history (cartService.salesHistory()),
-  // not the daily/weekly/monthly/yearly toggle below, so the summary stays
-  // stable while someone browses through different groupings. Cancelled
-  // orders are already excluded server-side (see server.js groupOrdersByDate),
-  // so no extra filtering is needed here. ──
-
+  // ── SALES HISTORY OVERVIEW ──
   historyTotals = computed(() => {
     const days = this.cartService.salesHistory();
     return {
@@ -336,8 +349,8 @@ menuSearchQuery = signal<string>('');
   });
 
   // ── BEST SELLER — date-range filter shared by the ranked list, branch
-  // performance bars, and growth comparison below, so they all agree on
-  // what "this period" means for the selected view. ──
+  // performance bars, and the Full Report modal below, so they all agree
+  // on what "this period" means for the selected view. ──
   private filteredDaysForBestSeller(view: BestSellerView, days: OrderHistoryDay[]): OrderHistoryDay[] {
     if (view === 'yearly') {
       const year = String(new Date().getFullYear());
@@ -361,19 +374,21 @@ menuSearchQuery = signal<string>('');
   );
 
   // ── BEST SELLERS — ranked by quantity sold for the selected period
-  // (alltime / yearly / monthly / weekly / custom), with the branches
-  // each item sold at. Cancelled orders are already excluded server-side,
-  // so no extra filtering is needed here. ──
+  // (alltime / yearly / monthly / weekly / custom), with per-item total
+  // sales (₱) and the branches each item sold at. Cancelled orders are
+  // already excluded server-side, so no extra filtering is needed here. ──
   bestSellers = computed(() => {
     const days = this.filteredBestSellerDays();
-    const tally = new Map<string, { name: string; qty: number; branches: Set<string> }>();
+    const tally = new Map<string, { name: string; qty: number; sales: number; branches: Set<string> }>();
 
     days.forEach(d => {
       d.orders.forEach(order => {
         order.items.forEach((entry: any) => {
           const key = entry.item.name;
-          const row = tally.get(key) ?? { name: entry.item.name, qty: 0, branches: new Set<string>() };
-          row.qty += entry.quantity;
+          const linePrice = priceForBranch(entry.item, order.branch) * entry.quantity;
+          const row = tally.get(key) ?? { name: entry.item.name, qty: 0, sales: 0, branches: new Set<string>() };
+          row.qty   += entry.quantity;
+          row.sales += linePrice;
           row.branches.add(order.branch ?? 'Unknown');
           tally.set(key, row);
         });
@@ -381,12 +396,16 @@ menuSearchQuery = signal<string>('');
     });
 
     return Array.from(tally.values())
-      .map(r => ({ name: r.name, qty: r.qty, branches: Array.from(r.branches) }))
+      .map(r => ({ name: r.name, qty: r.qty, sales: r.sales, branches: Array.from(r.branches) }))
       .sort((a, b) => b.qty - a.qty);
   });
 
   // Total units sold across all items in the selected period.
   bestSellerTotalQty = computed(() => this.bestSellers().reduce((sum, i) => sum + i.qty, 0));
+
+  // Total peso sales across all items in the selected period — powers the
+  // "Total Sales" KPI card and the % of Total columns in the report/summary.
+  bestSellerTotalSales = computed(() => this.bestSellers().reduce((sum, i) => sum + i.sales, 0));
 
   // Units sold per branch in the selected period (any item, not just the top seller).
   bestSellerBranchTally = computed(() => {
@@ -401,14 +420,31 @@ menuSearchQuery = signal<string>('');
     return map;
   });
 
-  // Branch performance bars — each branch's share of units sold this period.
+  // Peso sales per branch in the selected period — used by branch performance
+  // and the Full Report / Excel export.
+  bestSellerBranchSalesTally = computed(() => {
+    const map = new Map<string, number>();
+    this.filteredBestSellerDays().forEach(d => {
+      d.orders.forEach((order: any) => {
+        const branch = order.branch ?? 'Unknown';
+        const sales = order.items.reduce((s: number, e: any) => s + priceForBranch(e.item, order.branch) * e.quantity, 0);
+        map.set(branch, (map.get(branch) ?? 0) + sales);
+      });
+    });
+    return map;
+  });
+
+  // Branch performance bars — each branch's share of units sold this period,
+  // plus its peso sales (used by the Full Report and Excel export).
   branchPerformance = computed(() => {
-    const tally = this.bestSellerBranchTally();
-    const total = Array.from(tally.values()).reduce((sum, v) => sum + v, 0);
+    const qtyTally   = this.bestSellerBranchTally();
+    const salesTally = this.bestSellerBranchSalesTally();
+    const totalQty = Array.from(qtyTally.values()).reduce((sum, v) => sum + v, 0);
     return this.branches
       .map(branch => {
-        const qty = tally.get(branch) ?? 0;
-        return { branch, qty, percent: total > 0 ? Math.round((qty / total) * 100) : 0 };
+        const qty   = qtyTally.get(branch) ?? 0;
+        const sales = salesTally.get(branch) ?? 0;
+        return { branch, qty, sales, percent: totalQty > 0 ? Math.round((qty / totalQty) * 100) : 0 };
       })
       .sort((a, b) => b.qty - a.qty);
   });
@@ -418,97 +454,19 @@ menuSearchQuery = signal<string>('');
     return perf.length > 0 && perf[0].qty > 0 ? perf[0].branch : '—';
   });
 
-  // Growth — compares total units sold in the current period against the
-  // immediately preceding period of equal length. For 'alltime' (which has
-  // no natural "previous" period), it compares the trailing 30 days against
-  // the 30 days before that instead.
-  bestSellerGrowth = computed((): { percent: number | null; label: string } | null => {
-    const allDays = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date));
-    if (allDays.length < 2) return null;
-
-    const current = this.filteredBestSellerDays();
-    if (current.length === 0) return null;
-
-    let currentDates: string[];
-    let label: string;
-
-    if (this.bestSellerView() === 'alltime') {
-      currentDates = allDays.map(d => d.date).slice(-30);
-      label = 'vs previous 30 days';
-    } else {
-      currentDates = current.map(d => d.date).sort();
-      label = 'vs previous period';
-    }
-
-    const rangeLen = currentDates.length;
-    const earliestCurrent = currentDates[0];
-    const priorDates = allDays.filter(d => d.date < earliestCurrent).slice(-rangeLen).map(d => d.date);
-
-    const sumQty = (dates: string[]) => {
-      const set = new Set(dates);
-      return allDays
-        .filter(d => set.has(d.date))
-        .reduce((sum, d) => sum + d.orders.reduce((s: number, o: any) =>
-          s + o.items.reduce((si: number, e: any) => si + e.quantity, 0), 0), 0);
-    };
-
-    const currentQty = sumQty(currentDates);
-    const priorQty = sumQty(priorDates);
-
-    if (priorDates.length === 0 || priorQty === 0) return { percent: null, label };
-
-    const percent = Math.round(((currentQty - priorQty) / priorQty) * 100);
-    return { percent, label };
-  });
-
   // Looks up the current menu image for a best-seller row by item name.
   bestSellerImage(name: string): string {
     const item = this.cartService.menuItems().find(i => i.name === name);
     return item?.image || 'chutchut.jpg';
   }
 
-  // Sales trend for the #1 best seller — last 7 days, oldest to newest.
-  topSellerTrend = computed(() => {
-    const w = 400, h = 140, padding = 24;
-    const top = this.bestSellers()[0];
-    const empty = { points: [] as any[], linePath: '', areaPath: '', labels: [] as any[], w, h };
-    if (!top) return empty;
-
-    const days = [...this.cartService.salesHistory()].sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
-    if (days.length === 0) return empty;
-
-    const qtyPerDay = days.map(d => {
-      let qty = 0;
-      d.orders.forEach((o: any) => o.items.forEach((e: any) => { if (e.item.name === top.name) qty += e.quantity; }));
-      return { date: d.date, qty };
-    });
-
-    const maxQty = Math.max(1, ...qtyPerDay.map(d => d.qty));
-    const stepX = qtyPerDay.length > 1 ? (w - padding * 2) / (qtyPerDay.length - 1) : 0;
-
-    const points = qtyPerDay.map((d, i) => ({
-      x: padding + i * stepX,
-      y: h - padding - (d.qty / maxQty) * (h - padding * 2),
-      date: d.date,
-      qty: d.qty
-    }));
-
-    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-    const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${h - padding} L ${points[0].x.toFixed(1)} ${h - padding} Z`;
-
-    const labels = points.map(p => ({
-      date: p.date,
-      short: new Date(p.date + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short' })
-    }));
-
-    return { points, linePath, areaPath, labels, w, h };
-  });
-
-  // Exports the currently displayed best-seller ranking as a CSV.
+  // Quick CSV export of the currently displayed best-seller ranking —
+  // used by the toolbar's "Export" button (separate from the Full Report's
+  // PDF/Excel exports below, which cover the whole report).
   exportBestSellers(): void {
     const rows = this.bestSellers();
-    const header = 'Rank,Name,Quantity Sold,Branches\n';
-    const body = rows.map((r, i) => `${i + 1},"${r.name}",${r.qty},"${r.branches.join('; ')}"`).join('\n');
+    const header = 'Rank,Name,Quantity Sold,Total Sales,Branches\n';
+    const body = rows.map((r, i) => `${i + 1},"${r.name}",${r.qty},${r.sales},"${r.branches.join('; ')}"`).join('\n');
     const csv = header + body;
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -517,6 +475,225 @@ menuSearchQuery = signal<string>('');
     a.download = `best-sellers-${this.bestSellerView()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // ══════════════════════════════════════════
+  // BEST SELLERS SUMMARY — powers the on-page summary table and, together
+  // with branchPerformance above, the Full Report modal / PDF / Excel export.
+  // ══════════════════════════════════════════
+  bestSellersSummary = computed(() => {
+    const items = this.bestSellers();
+    const total = this.bestSellerTotalSales();
+    return items.map((item, i) => ({
+      rank: i + 1,
+      name: item.name,
+      qty: item.qty,
+      sales: item.sales,
+      percent: total > 0 ? Math.round((item.sales / total) * 1000) / 10 : 0
+    }));
+  });
+
+  // Human-readable label for the currently selected period, used in the
+  // Full Report header and both exports.
+  bestSellerPeriodLabel = computed(() => {
+    switch (this.bestSellerView()) {
+      case 'yearly':  return 'All Branches • This Year';
+      case 'monthly': return 'All Branches • This Month';
+      case 'weekly':  return 'All Branches • This Week';
+      case 'custom':  return 'All Branches • Custom Range';
+      default:        return 'All Branches • All Time';
+    }
+  });
+
+  reportGeneratedAt = computed(() =>
+    new Date().toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+  );
+
+  // Distinct color per sales-distribution slice, reused by the on-screen
+  // donut legend and matched again inside the exported PDF.
+  private readonly distributionColors = ['#CC0000', '#FFC200', '#1A1A1A', '#2E9BCC', '#7C3AED', '#2F8F4E', '#E8792F', '#A66A00'];
+
+  salesDistribution = computed(() => {
+    const items = this.bestSellersSummary();
+    return items.slice(0, 8).map((item, i) => ({
+      ...item,
+      color: this.distributionColors[i % this.distributionColors.length]
+    }));
+  });
+
+  salesDistributionGradient = computed(() => {
+    const slices = this.salesDistribution();
+    if (slices.length === 0 || this.bestSellerTotalSales() === 0) {
+      return 'conic-gradient(#f0ebe0 0% 100%)';
+    }
+    let cursor = 0;
+    const stops: string[] = [];
+    for (const s of slices) {
+      const start = cursor;
+      cursor += s.percent;
+      stops.push(`${s.color} ${start}% ${cursor}%`);
+    }
+    if (cursor < 100) stops.push(`#f0ebe0 ${cursor}% 100%`);
+    return `conic-gradient(${stops.join(', ')})`;
+  });
+
+  // ══════════════════════════════════════════
+  // FULL REPORT MODAL
+  // ══════════════════════════════════════════
+  showFullReport = signal(false);
+  pdfExporting    = signal(false);
+  excelExporting  = signal(false);
+
+  openFullReport(): void {
+    this.showFullReport.set(true);
+  }
+
+  closeFullReport(): void {
+    this.showFullReport.set(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.showFullReport()) this.closeFullReport();
+  }
+
+  // Exports the on-screen report as a real, multi-section, printable PDF.
+  // Uses jsPDF + jspdf-autotable — install with:
+  //   npm install jspdf jspdf-autotable
+  async exportReportPDF(): Promise<void> {
+    if (this.pdfExporting()) return;
+    this.pdfExporting.set(true);
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      const autoTableModule = await import('jspdf-autotable');
+      const autoTable = (autoTableModule as any).default ?? autoTableModule;
+
+      const doc = new jsPDF();
+      const marginX = 14;
+      let y = 18;
+
+      doc.setFontSize(18);
+      doc.setTextColor(204, 0, 0);
+      doc.text('CHUT CHUT', marginX, y);
+      y += 8;
+      doc.setFontSize(14);
+      doc.setTextColor(26, 26, 26);
+      doc.text('BEST SELLERS REPORT', marginX, y);
+      y += 6;
+      doc.setFontSize(9);
+      doc.setTextColor(120, 120, 120);
+      doc.text(this.bestSellerPeriodLabel(), marginX, y);
+      y += 5;
+      doc.text(`Generated on: ${this.reportGeneratedAt()}`, marginX, y);
+      y += 10;
+
+      doc.setFontSize(10);
+      doc.setTextColor(26, 26, 26);
+      doc.text(`Total Sales: P${this.bestSellerTotalSales().toFixed(2)}`, marginX, y);
+      doc.text(`Total Quantity Sold: ${this.bestSellerTotalQty()}`, marginX + 90, y);
+      doc.text(`Total Items: ${this.bestSellers().length}`, marginX + 150, y);
+      y += 8;
+
+      doc.setFontSize(11);
+      doc.text('1. Top Performing Menu Items', marginX, y);
+      autoTable(doc, {
+        startY: y + 4,
+        head: [['Rank', 'Menu Item', 'Quantity Sold', 'Total Sales', '% of Total']],
+        body: this.bestSellersSummary().map(r => [
+          r.rank, r.name, r.qty, `P${r.sales.toFixed(2)}`, `${r.percent}%`
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [204, 0, 0] },
+        styles: { fontSize: 9 }
+      });
+
+      let nextY = (doc as any).lastAutoTable.finalY + 12;
+      doc.setFontSize(11);
+      doc.text('2. Branch Performance', marginX, nextY);
+      autoTable(doc, {
+        startY: nextY + 4,
+        head: [['Rank', 'Branch', 'Quantity Sold', 'Total Sales', '% of Total']],
+        body: this.branchPerformance().map((b, i) => [
+          i + 1, b.branch, b.qty, `P${b.sales.toFixed(2)}`, `${b.percent}%`
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [204, 0, 0] },
+        styles: { fontSize: 9 }
+      });
+
+      nextY = (doc as any).lastAutoTable.finalY + 12;
+      doc.setFontSize(11);
+      doc.text('3. Sales Distribution', marginX, nextY);
+      let legendY = nextY + 7;
+      doc.setFontSize(9);
+      this.salesDistribution().forEach(s => {
+        const [r, g, b] = this.hexToRgb(s.color);
+        doc.setFillColor(r, g, b);
+        doc.rect(marginX, legendY - 3, 4, 4, 'F');
+        doc.setTextColor(26, 26, 26);
+        doc.text(`${s.name} (${s.percent}%)`, marginX + 7, legendY);
+        legendY += 6;
+      });
+
+      doc.save(`best-sellers-report-${this.bestSellerView()}.pdf`);
+    } catch (err) {
+      console.error('PDF export failed:', err);
+      this.showError('PDF export failed — please try again.');
+    } finally {
+      this.pdfExporting.set(false);
+    }
+  }
+
+  private hexToRgb(hex: string): [number, number, number] {
+    const clean = hex.replace('#', '');
+    const num = parseInt(clean, 16);
+    return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+  }
+
+  // Exports the report as a real, 3-sheet .xlsx workbook — reuses the same
+  // 'xlsx' (SheetJS) package already used by exportBackup() in cart-services.ts.
+  async exportReportExcel(): Promise<void> {
+    if (this.excelExporting()) return;
+    this.excelExporting.set(true);
+    try {
+      const XLSX = await import('xlsx');
+
+      const summaryRows = [
+        ['CHUT CHUT'],
+        ['Best Sellers Report'],
+        [this.bestSellerPeriodLabel()],
+        [`Generated on: ${this.reportGeneratedAt()}`],
+        [],
+        ['Total Sales', this.bestSellerTotalSales()],
+        ['Total Quantity Sold', this.bestSellerTotalQty()],
+        ['Total Items', this.bestSellers().length],
+      ];
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+
+      const topSellersRows = [
+        ['Rank', 'Menu Item', 'Quantity Sold', 'Total Sales', '% of Total Sales'],
+        ...this.bestSellersSummary().map(r => [r.rank, r.name, r.qty, r.sales, `${r.percent}%`])
+      ];
+      const topSellersSheet = XLSX.utils.aoa_to_sheet(topSellersRows);
+
+      const branchRows = [
+        ['Rank', 'Branch', 'Quantity Sold', 'Total Sales', '% of Total Sales'],
+        ...this.branchPerformance().map((b, i) => [i + 1, b.branch, b.qty, b.sales, `${b.percent}%`])
+      ];
+      const branchSheet = XLSX.utils.aoa_to_sheet(branchRows);
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+      XLSX.utils.book_append_sheet(wb, topSellersSheet, 'Top Sellers');
+      XLSX.utils.book_append_sheet(wb, branchSheet, 'Branch Performance');
+
+      XLSX.writeFile(wb, `best-sellers-report-${this.bestSellerView()}.xlsx`);
+    } catch (err) {
+      console.error('Excel export failed:', err);
+      this.showError('Excel export failed — please try again.');
+    } finally {
+      this.excelExporting.set(false);
+    }
   }
 
   private toDateStr(d: Date): string {
@@ -564,7 +741,8 @@ menuSearchQuery = signal<string>('');
     return `${fmt(days[0].date)} – ${fmt(days[days.length - 1].date)}`;
   });
 
-  // Sales Trend line chart — last 14 days, oldest to newest.
+  // Sales Trend line chart data — retained for potential reuse elsewhere
+  // (e.g. Sales History tab), even though it no longer renders on Best Sellers.
   trendChartData = computed(() => {
     const w = 560, h = 200, padding = 28;
     const days = [...this.cartService.salesHistory()]
@@ -661,19 +839,13 @@ menuSearchQuery = signal<string>('');
   }
 
   resetSales(): void {
-    // Refresh Sales History as soon as the reset actually completes on
-    // the server, instead of waiting for the next 30s poll — this only
-    // helps when the Manager is the one clicking Reset; if an Employee
-    // resets from their own dashboard, the poll above is what catches it.
     this.cartService.resetDailySales(() => {
       this.cartService.loadOrdersHistory();
     });
     this.showSuccess('Today\'s sales have been reset!');
   }
 
-  // ── DANGER ZONE — bulk-clear actions (Settings tab). Both are
-  // permanent and affect every branch, so each is gated behind a
-  // native confirm() prompt before touching the backend. ──
+  // ── DANGER ZONE ──
   clearAllOrders(): void {
     const confirmed = confirm(
       'This will permanently delete ALL orders and sales history for every branch. This cannot be undone. Continue?'
@@ -800,9 +972,6 @@ menuSearchQuery = signal<string>('');
         return found ? { ...found } : { branch, price: 0 };
       });
 
-      // Deep-clone variantGroups so editing the form doesn't mutate the
-      // original item (or another row sharing the same object reference)
-      // before Save is actually clicked.
       this.newItem.set({
         ...item,
         branchPricing,
@@ -815,11 +984,6 @@ menuSearchQuery = signal<string>('');
     }
 
       saveItem(): void {
-        // ── FIX: block Save while an image upload is still in flight.
-        // Previously nothing checked imageUploading(), so picking a photo
-        // and clicking Save right away would save the item with
-        // image: '' — the upload's result arrived a moment later into a
-        // signal nothing read anymore. ──
         if (this.imageUploading()) {
           this.showError('Please wait for the image to finish uploading.');
           return;
@@ -827,9 +991,6 @@ menuSearchQuery = signal<string>('');
 
         const item = this.newItem();
 
-        // Each check reports exactly why nothing was saved, instead of
-        // silently doing nothing — this was previously a bare `return`,
-        // which is what made Save look broken when a field was missing.
         if (!item.name?.trim()) {
           this.showError('Please enter an item name.');
           return;
@@ -844,18 +1005,12 @@ menuSearchQuery = signal<string>('');
           return;
         }
 
-    // Drop groups/options left blank in the editor rather than saving
-    // empty placeholders.
     const cleanedGroups = (item.variantGroups ?? [])
       .filter(g => g.name.trim().length > 0)
       .map(g => ({ ...g, options: g.options.filter(o => o.label.trim().length > 0) }));
 
     const finalItem = { ...item, variantGroups: cleanedGroups };
 
-    // The form only closes and shows a success message once the backend
-    // actually confirms the save — if the request fails (e.g. a rejected
-    // POST), the form stays open with the entered data intact and the
-    // real error is shown, instead of quietly discarding the input.
     const onSaved = (msg: string) => {
       this.showSuccess(msg);
       this.showMenuForm.set(false);
@@ -903,29 +1058,19 @@ menuSearchQuery = signal<string>('');
     this.imageUploading.set(true);
     this.cartService.uploadImage(file).subscribe({
       next: (result) => {
-        this.updateNewItem('image', result.url); // no more prepending the Render base URL — Cloudinary already returns a full URL
+        this.updateNewItem('image', result.url);
         this.imageUploading.set(false);
       },
       error: (err) => {
-        // ── FIX: this used to call showSuccess() on failure, so a failed
-        // upload displayed as a green "success" toast and was easy to
-        // miss. Now it correctly surfaces as an error. ──
         console.error('Image upload failed:', err);
         this.imageUploading.set(false);
         this.showError('Image upload failed — try a different file.');
       }
     });
-    input.value = ''; // allows re-selecting the same file later if needed
+    input.value = '';
   }
 
   // ── VARIANT GROUP EDITOR (Menu form) ──
-  // A menu item can have multiple variant groups (Sauce, Spice Level,
-  // Extras...), each either 'single' choice (radio) or 'multi' choice
-  // (checkboxes), optionally required, with options that can each carry
-  // a price add-on (priceDelta). This mirrors MenuItem.variantGroups
-  // exactly, so items created here work directly with the Employee
-  // Dashboard's variant picker.
-
   addVariantGroup(): void {
     const groups: VariantGroup[] = [...(this.newItem().variantGroups ?? [])];
     groups.push({ name: '', type: 'single', required: false, options: [] });
@@ -1030,7 +1175,7 @@ menuSearchQuery = signal<string>('');
   }
 
  logout(): void {
-  sessionStorage.removeItem('isManager'); // NEW
+  sessionStorage.removeItem('isManager');
   this.router.navigate(['/']);
   }
 }
